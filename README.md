@@ -50,3 +50,30 @@ An idea for reliable phone notifications without a user database: the device sub
 
 `.github/workflows/client.yml` (manual) builds unsigned bundles on GitHub's runners. **Untested**: the Windows build and the core
 tests were run locally; the macOS, Android and iOS-simulator jobs were written from the Tauri documentation and have not run yet.
+
+## Free and paid use
+
+| | Free | Paid |
+| --- | --- | --- |
+| Followed sites | 3 | no limit |
+| Looking for news | after the first run of the day (a daily digest) | after every run (3 a day) |
+
+**Trial**: from the first start every function is unlocked for 7 days (`trialStartedMs` in the state file), then the
+free plan applies. Change the length with the variable `GIT_TRIAL_DAYS` (at run time, or at build time:
+`GIT_TRIAL_DAYS=14 npm run build`; `0` = no trial). A clock set back does not extend it (`clockMs`). Deleting the state
+file starts a new trial, which is accepted: the follow list lives in the same file.
+
+No server and no account (`core/src/entitlement.rs`). Two ways to prove a purchase, both checked on the device:
+
+- **Stripe**: after a payment the operator signs a license key and sends it to the buyer
+  (`cargo run -p git_core --example license_tool -- sign ~/.g-i-t-license/private.key <buyer> [days]`).
+  The app verifies the Ed25519 signature against `LICENSE_PUBLIC_KEY`. The private key (`~/.g-i-t-license/private.key`)
+  must never enter a repository; back it up, because a lost key means the public key in the app has to be replaced.
+  `STRIPE_PAYMENT_LINK` in `src-tauri/src/lib.rs` is the Payment Link of the "buy" button (empty = no button).
+- **Microsoft Store / App Store / Google Play**: the platform part asks the store's own API (Windows.Services.Store,
+  StoreKit 2, Play Billing) and calls the command `set_store_entitlement(source, expiresMs)`; it is trusted for 7 days
+  without a new confirmation. **This platform code is not written yet**, and each store needs its own developer account,
+  product (subscription) and review.
+
+Limits of this design: the state file is plain JSON, so someone who edits it can unlock the paid plan; a license key can
+be shared. That is the price of "no server".

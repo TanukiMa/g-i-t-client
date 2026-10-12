@@ -2,6 +2,7 @@
 name = "git-client"
 version = "0.1.0"
 description = "G醫t client: notifications for the sites you follow"
+license = "MPL-2.0"
 edition = "2021"
 
 [lib]
@@ -10,6 +11,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+[features]
+# A build for a store (Mac App Store, App Store, Google Play, Microsoft Store): hides the Stripe button and the license-key field.
+store-build = []
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }

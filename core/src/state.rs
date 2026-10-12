@@ -1,5 +1,6 @@
 //! The client's own small database: one JSON file in the app's data folder. Nothing is sent anywhere.
 
+use crate::entitlement::{self, Plan, StoreEntitlement, FREE_MAX_FOLLOWS};
 use crate::feed::Site;
 use crate::schedule::Schedule;
 use serde::{Deserialize, Serialize};
@@ -57,6 +58,14 @@ pub struct State {
     pub schedule: Schedule,
     /// `generated` of the last status.json (Unix ms): the time the last run finished.
     pub generated_ms: i64,
+    /// Stripe license key (verified every time it is used, see entitlement.rs); empty = none.
+    pub license: String,
+    /// What a store reported about the subscription (set by the platform shell).
+    pub store: Option<StoreEntitlement>,
+    /// When the free trial began (Unix ms, set at the first start; 0 = not yet).
+    pub trial_started_ms: i64,
+    /// The latest time ever seen (Unix ms): a clock that is set back does not extend the trial.
+    pub clock_ms: i64,
 }
 
 impl Default for State {
@@ -79,6 +88,10 @@ impl Default for State {
             heads: HashMap::new(),
             schedule: Schedule::default(),
             generated_ms: 0,
+            license: String::new(),
+            store: None,
+            trial_started_ms: 0,
+            clock_ms: 0,
         }
     }
 }
@@ -99,6 +112,44 @@ impl State {
         self.heads = polled.heads;
         self.schedule = polled.schedule;
         self.generated_ms = polled.generated_ms;
+        self.clock_ms = self.clock_ms.max(polled.clock_ms);
+    }
+
+    /// The paid plan if there is one, else the trial while it lasts, else the free plan.
+    pub fn plan(&self, now_ms: i64) -> Plan {
+        let paid = entitlement::plan(&self.license, &self.store, now_ms);
+        if paid.is_pro() || self.trial_started_ms == 0 {
+            return paid;
+        }
+        let ends_ms = self.trial_started_ms + entitlement::trial_days() * 86_400_000;
+        if now_ms.max(self.clock_ms) < ends_ms {
+            Plan::Trial { ends_ms }
+        } else {
+            Plan::Free
+        }
+    }
+
+    /// Remembers the clock and starts the trial at the very first start. Call at every start and after every check.
+    pub fn tick(&mut self, now_ms: i64) {
+        self.clock_ms = self.clock_ms.max(now_ms);
+        if self.trial_started_ms == 0 {
+            self.trial_started_ms = self.clock_ms;
+        }
+    }
+
+    /// The followed sites that are looked at: all of them on the paid plan, the first `FREE_MAX_FOLLOWS` on the free one.
+    pub fn effective_follow(&self, now_ms: i64) -> Vec<String> {
+        let n = if self.plan(now_ms).unlocked() { self.follow.len() } else { FREE_MAX_FOLLOWS };
+        self.follow.iter().take(n).cloned().collect()
+    }
+
+    /// The schedule in use: all runs of the day on the paid plan, only the first one (a daily digest) on the free one.
+    pub fn effective_schedule(&self, now_ms: i64) -> Schedule {
+        let mut c = self.schedule.clone();
+        if !self.plan(now_ms).unlocked() {
+            c.runs.truncate(1);
+        }
+        c
     }
 
     /// Forget everything that belongs to the site that was read so far (another dashboard URL).
@@ -131,6 +182,7 @@ pub fn normalize_base(url: &str) -> Result<String, String> {
 pub fn load(path: &Path) -> State {
     let mut state: State = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     state.migrate();
+    state.tick(chrono::Utc::now().timestamp_millis());
     state
 }
 
@@ -143,6 +195,16 @@ impl State {
         for ids in self.seen.values_mut() {
             for id in ids.iter_mut() {
                 *id = crate::feed::seen_key(id);
+            }
+        }
+        // "Recent" entries stored before the move still carry the old address; their links are rebuilt on every load.
+        if self.base_url != OLD_DEFAULT_BASE_URL {
+            for r in self.recent.iter_mut() {
+                for u in [&mut r.diff_url, &mut r.history_url] {
+                    if let Some(rest) = u.strip_prefix(OLD_DEFAULT_BASE_URL) {
+                        *u = format!("{}{}", self.base_url, rest);
+                    }
+                }
             }
         }
         if self.base_url == OLD_DEFAULT_BASE_URL {

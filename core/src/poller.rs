@@ -113,8 +113,17 @@ fn refresh_sites_if(state: &mut State, f: &dyn Fetcher, now_ms: i64, unknown: bo
     Ok(true)
 }
 
+/// How many of the newest entries of a site seen for the first time are listed (silently) under "最近の更新".
+const FIRST_LOOK_RECENT: usize = 3;
+
+/// The one-line text of an entry: its title without the site name, or its body text when nothing is left.
+fn headline_of(name: &str, e: &Entry) -> String {
+    let headline = e.title.strip_prefix(name).map(|t| t.trim_start_matches([':', '：', ' ']).to_string()).unwrap_or_else(|| e.title.clone());
+    if headline.is_empty() { e.text.clone() } else { headline }
+}
+
 /// What to do with the entries of one site's feed: remember them (first time) or announce the new ones.
-///  - a site seen for the first time is only remembered (no flood of old updates),
+///  - a site seen for the first time is only remembered (no flood of old updates; its newest entries are listed, silently),
 ///  - ids already known are never announced again,
 ///  - more than BURST new ones at once -> one summary notification.
 fn handle_entries(state: &mut State, slug: &str, entries: Vec<Entry>, notify: &mut dyn FnMut(&Notice), now_ms: i64, result: &mut PollResult) {
@@ -122,6 +131,22 @@ fn handle_entries(state: &mut State, slug: &str, entries: Vec<Entry>, notify: &m
     let Some(seen) = state.seen.get(slug).cloned() else {
         state.seen.insert(slug.to_string(), entries.iter().take(SEEN_LIMIT).map(|e| e.key()).collect());
         result.first_seen.push(slug.to_string());
+        // No notification, but the newest entries are listed under "最近の更新": otherwise a site that was just
+        // followed would show nothing although the dashboard shows its latest updates.
+        let base = state.base_url.clone();
+        for e in entries.iter().take(FIRST_LOOK_RECENT).rev() {
+            state.recent.insert(0, Recent {
+                slug: slug.to_string(),
+                name: name.clone(),
+                time: jst(&e.updated),
+                text: headline_of(&name, e),
+                count: 1,
+                diff_url: diff_url(&base, e),
+                history_url: history_url(&base, slug),
+                at: now_ms,
+            });
+        }
+        state.recent.truncate(RECENT_LIMIT);
         return;
     };
     let fresh: Vec<&Entry> = entries.iter().filter(|e| !seen.contains(&e.key())).rev().collect(); // oldest first
@@ -142,8 +167,7 @@ fn handle_entries(state: &mut State, slug: &str, entries: Vec<Entry>, notify: &m
         });
     } else {
         for e in &fresh {
-            let headline = e.title.strip_prefix(name.as_str()).map(|t| t.trim_start_matches([':', '：', ' ']).to_string()).unwrap_or_else(|| e.title.clone());
-            let text = if headline.is_empty() { e.text.clone() } else { headline };
+            let text = headline_of(&name, e);
             notices.push(Notice {
                 slug: slug.to_string(),
                 title: name.clone(),
@@ -180,6 +204,7 @@ fn handle_entries(state: &mut State, slug: &str, entries: Vec<Entry>, notify: &m
 
 fn finish(state: &mut State, result: &PollResult, now_ms: i64) {
     state.last_check = now_ms;
+    state.tick(now_ms);
     state.last_error = result.errors.iter().map(|(s, m)| format!("{s}: {m}")).collect::<Vec<_>>().join(" / ").chars().take(300).collect();
 }
 
@@ -190,7 +215,7 @@ pub fn poll_once(state: &mut State, f: &dyn Fetcher, notify: &mut dyn FnMut(&Not
     if let Err(e) = refresh_sites(state, f, now_ms) {
         result.errors.push(("(sites)".into(), e));
     }
-    let follow = state.follow.clone();
+    let follow = state.effective_follow(now_ms);
     for slug in &follow {
         let r = match f.get(&format!("{}feeds/{slug}.xml", state.base_url), state.etags.get(slug).map(String::as_str)) {
             Ok(r) => r,
@@ -279,7 +304,7 @@ pub fn poll_scheduled(state: &mut State, f: &dyn Fetcher, notify: &mut dyn FnMut
         result.errors.push(("(sites)".into(), e));
     }
 
-    let follow = state.follow.clone();
+    let follow = state.effective_follow(now_ms);
     for slug in &follow {
         let Some(head) = state.status_sites.get(slug).cloned() else {
             // no real update yet: remember that the site is known, so that its first update is announced
@@ -337,10 +362,10 @@ pub fn next_check_ms(state: &State, now_ms: i64) -> i64 {
     let interval_ms = state.interval_min.clamp(5, 240) as i64 * 60_000;
     let at = if !state.status_mode {
         state.last_check + interval_ms
-    } else if state.last_check < state.schedule.latest_window_start(now_ms) {
+    } else if state.last_check < state.effective_schedule(now_ms).latest_window_start(now_ms) {
         now_ms // a window began after the last look (the app was closed or the computer asleep): catch up now
     } else {
-        state.schedule.next_check(now_ms, state.generated_ms)
+        state.effective_schedule(now_ms).next_check(now_ms, state.generated_ms)
     };
     at.max(now_ms)
 }

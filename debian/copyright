@@ -1,0 +1,23 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: giiit
+Source: https://giiit.goudge.org/
+
+Files: *
+Copyright: FIXME the owner of the g-i-t-client code
+License: MPL-2.0
+
+# The source tarball carries the crates of `cargo vendor` in vendor/. Each has its
+# own licence (mostly MIT / Apache-2.0 / BSD). FIXME: before the first upload list
+# them here (for example with `cargo about` or `cargo license`), one stanza per
+# licence, as the Debian copyright format requires.
+Files: vendor/*
+Copyright: the authors of the vendored crates
+License: MIT or Apache-2.0 or BSD-3-clause or MPL-2.0 or Unicode-3.0 or Zlib
+ See the Cargo.toml of each crate under vendor/ for the exact terms.
+
+License: MPL-2.0
+ This Source Code Form is subject to the terms of the Mozilla Public License,
+ v. 2.0. If a copy of the MPL was not distributed with this file, You can obtain
+ one at https://mozilla.org/MPL/2.0/.
+ .
+ On Debian systems the full text of the licence is in the source tarball (LICENSE).

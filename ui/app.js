@@ -4,16 +4,21 @@
 (function () {
   const invoke = window.__TAURI__.core.invoke;
   const $ = (id) => document.getElementById(id);
-  let sites = [], follow = new Set();
+  let sites = [], follow = new Set(), freeMax = 3, buyUrl = "";
 
   const say = (t) => { $("msg").textContent = t; };
-  const when = (ms) => (ms ? new Date(ms).toLocaleString() : "まだ確認していません");
+  // always Japanese and Japan time, like the dashboard (the device may be set to another language or zone)
+  const fmt = (ms) => new Date(ms).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) + " JST";
+  const when = (ms) => (ms ? fmt(ms) : "まだ確認していません");
 
   function statusLine(v) {
-    $("status").textContent = `フォロー中 ${v.follow.length} サイト ・ 最終確認 ${when(v.lastCheck)}`
-      + (v.follow.length ? ` ・ 次回 ${new Date(v.nextCheck).toLocaleString()}` : "")
+    $("status").textContent = `フォロー中 ${v.follow.length} サイト ・ サイトの最終実行 ${v.generatedMs ? when(v.generatedMs) : "不明"} ・ 最終確認 ${when(v.lastCheck)}`
+      + (v.follow.length ? ` ・ 次回 ${fmt(v.nextCheck)}` : "")
       + (v.lastError ? ` ・ 注意: ${v.lastError}` : "");
     $("scheduleNote").textContent = v.scheduleText;
+    $("planText").textContent = v.planText;
+    $("buyBtn").hidden = !v.purchaseUrl || v.plan === "pro"; buyUrl = v.purchaseUrl;
+    $("licenseRow").hidden = v.storeBuild;
   }
 
   function renderRecent(list) {
@@ -49,7 +54,8 @@
       cb.type = "checkbox"; cb.checked = follow.has(s.slug);
       cb.addEventListener("change", async () => {
         cb.checked ? follow.add(s.slug) : follow.delete(s.slug);
-        await invoke("set_follow", { slugs: [...follow] });
+        const got = await invoke("set_follow", { slugs: [...follow] });
+        if (got.length !== follow.size) { follow = new Set(got); cb.checked = follow.has(s.slug); say(`無料プランでは ${freeMax} サイトまでです。`); }
         $("count").textContent = `${follow.size} / ${sites.length} 件をフォロー中`;
       });
       const name = document.createElement("span"); name.textContent = s.name;
@@ -60,13 +66,30 @@
     $("count").textContent = `${follow.size} / ${sites.length} 件をフォロー中（${shown} 件を表示）`;
   }
 
+  function applySize(v) {
+    if (!["small", "normal", "large", "huge"].includes(v)) v = "normal";
+    document.documentElement.dataset.size = v; $("fontSize").value = v;
+  }
+  let savedSize = "normal";
+  try { savedSize = localStorage.getItem("git-client:size") || "normal"; } catch {}
+  applySize(savedSize);
+  $("fontSize").addEventListener("change", () => {
+    applySize($("fontSize").value);
+    try { localStorage.setItem("git-client:size", $("fontSize").value); } catch {}
+  });
+
   async function load() {
     const v = await invoke("get_state");
-    sites = v.sites; follow = new Set(v.follow);
-    $("baseUrl").value = v.baseUrl; $("interval").value = v.intervalMin; $("login").checked = v.openAtLogin;
+    sites = v.sites; follow = new Set(v.follow); freeMax = v.freeMaxFollows;
+    $("login").checked = v.openAtLogin;
     statusLine(v); renderRecent(v.recent); renderSites();
-    if (!sites.length) say("サイトの一覧を取得できませんでした。ダッシュボードの URL とネットワークを、確認してください。");
+    if (!sites.length) {
+      // the first look runs a few seconds after the start: ask again a few times before giving up
+      if (loadTries++ < 6) setTimeout(load, 5000);
+      else say("サイトの一覧を取得できませんでした。ネットワークを確認してください。");
+    }
   }
+  let loadTries = 0;
 
   $("filter").addEventListener("input", renderSites);
   $("only").addEventListener("change", renderSites);
@@ -75,12 +98,25 @@
     follow = new Set(r.follow); $("import").value = "";
     say(r.added ? `${r.added} 件を取り込みました。` : "取り込めるサイトが、見つかりませんでした。"); renderSites();
   });
-  $("saveBtn").addEventListener("click", async () => {
+  // the start-at-login switch is saved as soon as it is changed (there is no save button)
+  $("login").addEventListener("change", async () => {
     try {
-      await invoke("set_options", { baseUrl: $("baseUrl").value, intervalMin: Number($("interval").value) || 15, openAtLogin: $("login").checked });
+      await invoke("set_options", { openAtLogin: $("login").checked });
       say("保存しました。"); await load();
     } catch (e) { say("保存できませんでした: " + e); }
   });
+  // two screens: 通知 (recent updates, sites) and 設定 (plan, import, display, start at login)
+  function showView(name) {
+    for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", String(t.dataset.view === name));
+    $("view-main").hidden = name !== "main"; $("view-settings").hidden = name !== "settings";
+    say("");
+  }
+  for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => showView(t.dataset.view));
+  $("licenseBtn").addEventListener("click", async () => {
+    try { await invoke("set_license", { key: $("licenseKey").value }); $("licenseKey").value = ""; say("ライセンスキーを確認しました。"); await load(); }
+    catch (e) { say("有効にできませんでした: " + e); }
+  });
+  $("buyBtn").addEventListener("click", () => invoke("open_external", { url: buyUrl }));
   $("checkBtn").addEventListener("click", async () => {
     say("確認しています…");
     await invoke("check_now");

@@ -1,0 +1,30 @@
+Source: giiit
+Section: net
+Priority: optional
+# FIXME: put the real name and address of the person who signs and uploads the package.
+Maintainer: FIXME Maintainer <fixme@example.org>
+Build-Depends: debhelper-compat (= 13),
+               cargo,
+               rustc,
+               pkg-config,
+               libwebkit2gtk-4.1-dev,
+               libgtk-3-dev,
+               libayatana-appindicator3-dev,
+               librsvg2-dev,
+               libsoup-3.0-dev,
+               libjavascriptcoregtk-4.1-dev
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://giiit.goudge.org/
+
+Package: giiit
+Architecture: any
+# the tray library is loaded at run time, so dpkg-shlibdeps does not see it
+Depends: ${shlibs:Depends}, ${misc:Depends}, libayatana-appindicator3-1
+Description: notifications for the medical and administrative sites you follow
+ giiit (G醫t) watches the public update feeds of the G醫t dashboard and shows a
+ desktop notification when a site you follow has changed. The follow list stays
+ on this computer; there is no account and no server of its own.
+ .
+ The free plan follows three sites and looks once a day; a license key or a
+ trial lifts that limit.

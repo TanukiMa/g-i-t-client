@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=G醫t
+Comment=Notifications for the sites you follow
+Exec=giiit
+Icon=giiit
+Terminal=false
+Categories=Network;

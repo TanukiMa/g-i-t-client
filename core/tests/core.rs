@@ -128,6 +128,8 @@ fn first_look_is_silent_and_a_new_update_is_announced_once() {
     let (r, notes) = run(&mut st, &f);
     assert_eq!(r.first_seen, ["s1"]);
     assert!(notes.is_empty());
+    assert_eq!(st.recent.len(), 2, "the newest entries are listed, without a notification");
+    assert_eq!(st.recent[0].diff_url, format!("https://dash.example/sites/s1/diff_{}.html", &hash(2)[..7]), "newest first");
 
     set(&f, "s1", &[item(3, "追加: 新しい公示"), item(2, "追加: お知らせ"), item(1, "追加: お知らせ")], "\"v2\"");
     let (_, notes) = run(&mut st, &f);
@@ -138,8 +140,8 @@ fn first_look_is_silent_and_a_new_update_is_announced_once() {
     assert!(n.body.contains("新しい公示"));
     assert_eq!(n.diff_url, format!("https://dash.example/sites/s1/diff_{}.html", &hash(3)[..7])); // from the configured base URL, not the feed's host
     assert_eq!(n.history_url, "https://dash.example/sites/s1/history.html");
-    assert_eq!(st.recent.len(), 1);
-    assert_eq!(st.recent[0].diff_url, n.diff_url);
+    assert_eq!(st.recent.len(), 3);
+    assert_eq!(st.recent[0].diff_url, n.diff_url, "the announced update is on top");
 
     let (_, notes) = run(&mut st, &f); // same feed again: a 304, nothing new
     assert!(notes.is_empty());

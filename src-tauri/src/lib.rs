@@ -6,6 +6,7 @@
 //! while the app is closed is decided by the OS (see client/README.md).
 
 use git_core::feed::{parse_follow_input, Site};
+use git_core::entitlement::{verify_license, Plan, Source, StoreEntitlement, FREE_MAX_FOLLOWS};
 use git_core::poller::{next_check_ms, poll_scheduled, refresh_sites, HttpFetcher, Notice};
 use git_core::state::{self, Recent, State};
 use serde::Serialize;
@@ -78,12 +79,58 @@ struct View {
     /// True: the site publishes status.json and the app looks after the runs; false: every `interval_min` minutes.
     status_mode: bool,
     schedule_text: String,
+    /// When the site's last run finished (`generated` of status.json, Unix ms); 0 = not known (no status.json yet).
+    generated_ms: i64,
+    /// "free" or "pro"; `plan_text` is the line shown in the settings; `free_max_follows` the limit of the free plan.
+    plan: &'static str,
+    plan_text: String,
+    free_max_follows: usize,
+    purchase_url: &'static str,
+    /// True in a store build (Cargo feature `store-build`): no Stripe button, no license-key field; only the store sells.
+    store_build: bool,
+}
+
+/// Where the "buy" button of the Stripe route leads (a Stripe Payment Link). Empty: no button.
+const STRIPE_PAYMENT_LINK: &str = "";
+
+/// A store build shows only the store's own purchase (App Store rules forbid license keys and outside payment links).
+const STORE_BUILD: bool = cfg!(feature = "store-build");
+
+fn plan_text(s: &State, now: i64) -> String {
+    match s.plan(now) {
+        Plan::Pro { source, expires_ms } => {
+            let until = if expires_ms == 0 { "期限なし".to_string() } else { format!("あと約 {} 日", ((expires_ms - now).max(0) + 86_399_999) / 86_400_000) };
+            format!("有料プラン（{}・{}）：フォロー数の制限なし、1日3回の定時確認", source.label(), until)
+        }
+        Plan::Trial { ends_ms } => format!(
+            "お試し期間中：あと約 {} 日は制限なし。その後は無料プラン（{} サイトまで・1日1回）になります",
+            ((ends_ms - now).max(0) + 86_399_999) / 86_400_000,
+            FREE_MAX_FOLLOWS
+        ),
+        Plan::Free => format!("無料プラン：フォローは {} サイトまで、確認は1日1回（朝の更新分）", FREE_MAX_FOLLOWS),
+    }
+}
+
+/// Additions are allowed only up to the limit of the plan; removing is always allowed.
+fn limit_follow(old: &[String], wanted: Vec<String>, pro: bool) -> Vec<String> {
+    if pro {
+        return wanted;
+    }
+    let mut out: Vec<String> = wanted.iter().filter(|w| old.contains(w)).cloned().collect();
+    for w in wanted.into_iter().filter(|w| !old.contains(w)) {
+        if out.len() < FREE_MAX_FOLLOWS {
+            out.push(w);
+        }
+    }
+    out
 }
 
 fn schedule_text(s: &State) -> String {
     if s.status_mode {
-        let c = &s.schedule;
+        let c = &s.effective_schedule(now_ms());
         format!("定時: {}（日本時間）の約 {} 分後から {} 分間、{} 分おきに確認します。それ以外の時間は確認しません。", c.runs_text(), c.delay_min, c.window_min, c.step_min)
+    } else if s.last_check == 0 {
+        "最初の確認のあとに、確認の予定が表示されます。".to_string() // nothing has been read yet: do not claim that the site has no schedule
     } else {
         format!("このサイトは定時の情報を出していないので、{} 分おきに確認します。", s.interval_min)
     }
@@ -110,6 +157,12 @@ fn view(app: &AppHandle, s: &State) -> View {
         next_check: next_check_ms(s, now_ms()),
         status_mode: s.status_mode,
         schedule_text: schedule_text(s),
+        generated_ms: s.generated_ms,
+        plan: match s.plan(now_ms()) { Plan::Pro { .. } => "pro", Plan::Trial { .. } => "trial", Plan::Free => "free" },
+        plan_text: plan_text(s, now_ms()),
+        free_max_follows: FREE_MAX_FOLLOWS,
+        purchase_url: if STORE_BUILD { "" } else { STRIPE_PAYMENT_LINK },
+        store_build: STORE_BUILD,
     }
 }
 
@@ -140,6 +193,7 @@ async fn get_state(app: AppHandle, shared: tauri::State<'_, SharedState>) -> Res
 fn set_follow(app: AppHandle, shared: tauri::State<'_, SharedState>, slugs: Vec<String>) -> Vec<String> {
     let follow = parse_follow_input(&slugs.join(","));
     let mut s = shared.state.lock().unwrap();
+    let follow = limit_follow(&s.follow, follow, s.plan(now_ms()).unlocked());
     s.follow = follow.clone();
     save(&shared, &s);
     #[cfg(desktop)]
@@ -159,11 +213,16 @@ struct Imported {
 fn import_follow(app: AppHandle, shared: tauri::State<'_, SharedState>, text: String) -> Imported {
     let add = parse_follow_input(&text);
     let mut s = shared.state.lock().unwrap();
+    let before = s.follow.len();
+    let mut wanted = s.follow.clone();
     for a in &add {
-        if !s.follow.contains(a) {
-            s.follow.push(a.clone());
+        if !wanted.contains(a) {
+            wanted.push(a.clone());
         }
     }
+    let old = s.follow.clone();
+    s.follow = limit_follow(&old, wanted, s.plan(now_ms()).unlocked());
+    let add: Vec<String> = s.follow[before..].to_vec();
     save(&shared, &s);
     #[cfg(desktop)]
     desktop::refresh_tray(&app, &s);
@@ -194,6 +253,36 @@ fn set_options(app: AppHandle, shared: tauri::State<'_, SharedState>, base_url: 
     save(&shared, &s);
     let _ = shared.wake.lock().unwrap().send(()); // re-read the interval
     Ok(())
+}
+
+/// The Stripe route: the signed license key the buyer received. An empty text removes it.
+#[tauri::command]
+fn set_license(app: AppHandle, shared: tauri::State<'_, SharedState>, key: String) -> Result<(), String> {
+    if STORE_BUILD {
+        return Err("このビルドではライセンスキーは使えません。".into());
+    }
+    let key = key.trim().to_string();
+    if !key.is_empty() {
+        verify_license(&key, now_ms())?;
+    }
+    let mut s = shared.state.lock().unwrap();
+    s.license = key;
+    save(&shared, &s);
+    #[cfg(desktop)]
+    desktop::refresh_tray(&app, &s);
+    let _ = &app;
+    let _ = shared.wake.lock().unwrap().send(());
+    Ok(())
+}
+
+/// The store route: called by the platform part (Microsoft Store / App Store / Google Play) after the store itself has
+/// confirmed the subscription. `expires_ms` = 0 clears it. The store, not this app, decides whether it is valid.
+#[tauri::command]
+fn set_store_entitlement(shared: tauri::State<'_, SharedState>, source: Source, expires_ms: i64) {
+    let mut s = shared.state.lock().unwrap();
+    s.store = (expires_ms > 0).then(|| StoreEntitlement { source, expires_ms, checked_ms: now_ms() });
+    save(&shared, &s);
+    let _ = shared.wake.lock().unwrap().send(());
 }
 
 #[tauri::command]
@@ -426,7 +515,7 @@ pub fn run() {
             }
             let _ = (window, event);
         })
-        .invoke_handler(tauri::generate_handler![get_state, set_follow, import_follow, set_options, check_now, test_notification, open_external])
+        .invoke_handler(tauri::generate_handler![get_state, set_follow, import_follow, set_options, set_license, set_store_entitlement, check_now, test_notification, open_external])
         .run(tauri::generate_context!())
         .expect("error while running G醫t client");
 }

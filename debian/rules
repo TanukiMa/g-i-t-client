@@ -1,0 +1,30 @@
+#!/usr/bin/make -f
+# Builds from the vendored crates in vendor/ (see scripts/make-debian-orig.sh); no network is used.
+export CARGO_HOME = $(CURDIR)/debian/cargo_home
+export CARGO_TARGET_DIR = $(CURDIR)/target
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+
+override_dh_auto_build:
+	cargo build --release --frozen --offline -p git-client --features tauri/custom-protocol
+
+override_dh_auto_test:
+	cargo test --release --frozen --offline -p git_core
+
+override_dh_auto_install:
+	install -D -m 0755 target/release/git-client debian/giiit/usr/bin/giiit
+	install -D -m 0644 debian/giiit.desktop debian/giiit/usr/share/applications/giiit.desktop
+	install -D -m 0644 src-tauri/icons/32x32.png debian/giiit/usr/share/icons/hicolor/32x32/apps/giiit.png
+	install -D -m 0644 src-tauri/icons/128x128.png debian/giiit/usr/share/icons/hicolor/128x128/apps/giiit.png
+	install -D -m 0644 src-tauri/icons/128x128@2x.png debian/giiit/usr/share/icons/hicolor/256x256/apps/giiit.png
+
+# dh_clean deletes *.orig files as editor leftovers, but the vendored crates carry a Cargo.toml.orig
+# that cargo's checksum file lists: keep them.
+override_dh_clean:
+	dh_clean -X Cargo.toml.orig
+
+override_dh_auto_clean:
+	rm -rf target debian/cargo_home

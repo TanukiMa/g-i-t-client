@@ -12,49 +12,76 @@
     <p id="status" class="muted"></p>
   </header>
 
-  <section>
-    <h2>最近の更新</h2>
-    <p id="recentEmpty" class="muted">通知した更新が、ここに並びます（クリックで差分を開きます）。</p>
-    <ul id="recent" class="sites"></ul>
-  </section>
+  <nav class="tabs" role="tablist" aria-label="画面">
+    <button class="tab" id="tab-main" role="tab" type="button" data-view="main" aria-selected="true">通知</button>
+    <button class="tab" id="tab-settings" role="tab" type="button" data-view="settings" aria-selected="false">設定</button>
+  </nav>
 
-  <section>
-    <h2>通知を受け取るサイト</h2>
-    <div class="row">
-      <input id="filter" type="search" placeholder="サイト名・ドメインで絞り込む" aria-label="サイトの絞り込み" />
-      <label class="chk"><input id="only" type="checkbox" /> フォロー中のみ</label>
-      <span id="count" class="muted"></span>
-    </div>
-    <ul id="sites" class="sites"></ul>
-  </section>
+  <main id="view-main" role="tabpanel" aria-labelledby="tab-main">
+    <section>
+      <h2>最近の更新</h2>
+      <p id="recentEmpty" class="muted">通知した更新が、ここに並びます（クリックで差分を開きます）。</p>
+      <ul id="recent" class="sites"></ul>
+    </section>
 
-  <section>
-    <h2>ブラウザの☆から取り込む</h2>
-    <p class="muted">ダッシュボードの「🔗 フォロー設定を共有」で作った URL（または slug をカンマ区切りで）を貼り付けると、今の選択に足されます。</p>
-    <div class="row">
-      <input id="import" type="text" placeholder="https://…/?follow=a,b,c" aria-label="共有 URL" />
-      <button id="importBtn" type="button">取り込む</button>
-    </div>
-  </section>
+    <section>
+      <h2>通知を受け取るサイト</h2>
+      <div class="row">
+        <input id="filter" type="search" placeholder="サイト名・ドメインで絞り込む" aria-label="サイトの絞り込み" />
+        <label class="chk"><input id="only" type="checkbox" /> フォロー中のみ</label>
+        <span id="count" class="muted"></span>
+      </div>
+      <ul id="sites" class="sites"></ul>
+      <div class="row">
+        <button id="checkBtn" type="button">今すぐ確認</button>
+      </div>
+      <p id="scheduleNote" class="muted"></p>
+    </section>
+  </main>
 
-  <section>
-    <h2>設定</h2>
-    <div class="grid">
-      <label for="baseUrl">ダッシュボードの URL</label>
-      <input id="baseUrl" type="url" />
-      <label for="interval">確認の間隔（分）<br /><small>定時の情報が無いサイトでだけ使います</small></label>
-      <input id="interval" type="number" min="5" max="240" step="5" />
-      <label for="login" id="loginLabel">ログイン時に起動</label>
-      <input id="login" type="checkbox" />
-    </div>
-    <div class="row">
-      <button id="saveBtn" type="button">設定を保存</button>
-      <button id="checkBtn" type="button">今すぐ確認</button>
-      <button id="testBtn" type="button">通知のテスト</button>
-    </div>
-    <p id="scheduleNote" class="muted"></p>
-    <p id="msg" class="muted" role="status"></p>
-  </section>
+  <main id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+    <section>
+      <h2>プラン</h2>
+      <p id="planText" class="muted"></p>
+      <div class="row" id="licenseRow">
+        <input id="licenseKey" type="text" placeholder="ライセンスキー（GIT1.…）" aria-label="ライセンスキー" />
+        <button id="licenseBtn" type="button">有効にする</button>
+        <button id="buyBtn" type="button" hidden>購入する（Stripe）</button>
+      </div>
+      <p class="muted" id="storeNote">Microsoft Store・App Store・Google Play で購入した場合は、ストアが自動で有効にします。</p>
+    </section>
+
+    <section>
+      <h2>ブラウザの☆から取り込む</h2>
+      <p class="muted">ダッシュボードの「🔗 フォロー設定を共有」で作った URL（または slug をカンマ区切りで）を貼り付けると、今の選択に足されます。無料プランでは 3 サイトまでです。</p>
+      <div class="row">
+        <input id="import" type="text" placeholder="https://…/?follow=a,b,c" aria-label="共有 URL" />
+        <button id="importBtn" type="button">取り込む</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>表示と起動</h2>
+      <div class="grid">
+        <label for="fontSize">文字の大きさ</label>
+        <select id="fontSize" aria-label="文字の大きさ">
+          <option value="small">Small</option><option value="normal">Normal</option>
+          <option value="large">Large</option><option value="huge">Huge</option>
+        </select>
+        <label for="login" id="loginLabel">ログイン時に起動</label>
+        <input id="login" type="checkbox" />
+      </div>
+    </section>
+
+    <section>
+      <h2>動作の確認</h2>
+      <div class="row">
+        <button id="testBtn" type="button">通知のテスト</button>
+      </div>
+    </section>
+  </main>
+
+  <p id="msg" class="muted" role="status"></p>
 
   <script src="app.js"></script>
 </body>

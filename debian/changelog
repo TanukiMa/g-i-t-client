@@ -1,0 +1,6 @@
+giiit (0.1.0-1) UNRELEASED; urgency=medium
+
+  * Initial packaging for a self-hosted apt repository. Not meant for the
+    official Debian archive (dependencies are vendored, see debian/copyright).
+
+ -- FIXME Maintainer <fixme@example.org>  Tue, 13 Oct 2026 01:00:00 +0900

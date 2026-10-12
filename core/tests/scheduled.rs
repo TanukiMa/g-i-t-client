@@ -1,5 +1,6 @@
 //! status.json, the schedule and the scheduled poll (poll_scheduled), with a fake network.
 
+use git_core::entitlement::{Source, StoreEntitlement};
 use git_core::feed::{parse_status, Site};
 use git_core::poller::{next_check_ms, poll_scheduled, FetchResult, Fetcher, Notice, PollResult};
 use git_core::schedule::Schedule;
@@ -89,7 +90,10 @@ fn the_next_look_depends_on_the_mode() {
 
     st.status_mode = true;
     st.generated_ms = jst("2026-10-09 12:41");
-    assert_eq!(next_check_ms(&st, now), jst("2026-10-09 16:38"), "status.json: after the next run");
+    // free plan: only the first run of the day is looked at (a daily digest)
+    assert_eq!(next_check_ms(&st, now), jst("2026-10-10 07:38"), "free: after the first run of the next day");
+    st.store = Some(StoreEntitlement { source: Source::MicrosoftStore, expires_ms: now + 30 * 86_400_000, checked_ms: now });
+    assert_eq!(next_check_ms(&st, now), jst("2026-10-09 16:38"), "paid: after the next run");
 
     // the app was closed during the 12:38 window: the first look afterwards is at once
     st.last_check = jst("2026-10-09 11:00");
