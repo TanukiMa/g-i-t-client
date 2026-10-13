@@ -51,7 +51,7 @@ This section says what the app is built **for**. Entries marked **[decided]** we
 | Android | **[decided]** wanted; the checking while closed is not written | Google Play **[undecided]**, or an APK | Google Play Billing for the store build | **[partly]** debug APK for x86_64 builds on Windows (`src-tauri/gen/android` exists), not run on a device or the emulator; background check missing |
 | iOS / iPadOS | **[decided]** wanted; no background check without push | App Store **[undecided]** | App Store IAP only (see §6) | screen shared, push missing |
 | watchOS, tvOS | no: not Tauri targets | – | – | – |
-| Linux (desktop) | **[decided]** wanted | Debian package (`.deb`, Tauri bundle) as a direct download, and a source package (`debian/`) for a **self-hosted apt repository**; **submission to the official Debian archive is undecided** (see below); Flathub **[undecided]** | Stripe license key (direct build only: no store on Linux sells subscriptions) | **[partly]** both packages build in WSL Debian 13 (`giiit_0.1.0_amd64.deb` from Tauri; `giiit_0.1.0-1_amd64.deb` from `debian/`), neither has been installed or started; GNOME shows no tray icon without an AppIndicator extension, so the window must not be the only way back in |
+| Linux (desktop) | **[decided]** wanted | Debian package (`.deb`, Tauri bundle) as a direct download, and a source package (`debian/`) for a **self-hosted apt repository**; **submission to the official Debian archive is undecided** (see below); Flathub **[undecided]** | Stripe license key (direct build only: no store on Linux sells subscriptions) | **[partly]** both packages build in WSL Debian 13 (`giiit_0.1.0_amd64.deb` from Tauri; `giiit_0.1.0-1_amd64.deb` from `debian/`); the binary was started under WSLg and its window renders correctly (first-start screen, chips) **only with `WEBKIT_DISABLE_DMABUF_RENDERER=1`** (without it the window stays empty), so the app sets that variable itself on Linux; the `.deb` packages have not been installed, and notifications, tray and autostart have not been tried on Linux; GNOME shows no tray icon without an AppIndicator extension, so the window must not be the only way back in |
 | ChromeOS | **[decided]** wanted (owner's requirement: it must run on x86_64 Chromebooks and ChromeBoxes, not only on ARM) | Google Play (the Android build), or the Linux `.deb` in the ChromeOS Linux container **[undecided]** | Google Play Billing (store build); Stripe license key for the `.deb` | not built, not tested |
 
 Linux packaging rules:
@@ -148,6 +148,14 @@ verified by these two; say so instead of claiming they work.
 - An update is remembered as `<slug>/<commit>` (`Entry::key()`), not as the whole entry id (the id carries the host name
   and changed with the domain move). Old states are converted on load.
 - More than `BURST` (3) new entries of one site at once become one notification.
+- More than `MAX_NOTICES` (5) notifications in ONE check (several sites, typically a whole category) become one summary
+  notification ("11 件の更新を検知しました（A、B、C ほか）") that opens the dashboard; every update is still listed
+  one by one under 「最近の更新」.
+- 「最近の更新」 is sorted by the time of the update, newest first (`Recent::updated_ms`, `State::sort_recent`), not by
+  the time it was found; at most `RECENT_LIMIT` (50). The screen shows only the entries of the sites that are looked at
+  now (a category that was switched off keeps its history in the state, it is back when the category is picked again).
+- Of the sites seen for the first time in one check only the first `FIRST_LOOK_SITES` (5) get their newest entries
+  listed, so that picking a whole category does not bury the list.
 - Links are built from the configured base URL, never from the host inside a feed.
 - One failing site does not stop the others. A network error leaves the state unchanged.
 
@@ -157,6 +165,26 @@ the old default base URL (`https://tanukima.github.io/g-i-t-data/`) becomes the 
 "最近の更新" that still start with the old address are rewritten to the current base URL.
 New fields must have `#[serde(default)]` behaviour (the struct has it) so that old files still load.
 
+### 4.4 Choosing sites by category **[done in core, shell and screen; looked at in the emulator only in part]**
+- The dashboard publishes `tags` per site and, since `g-i-t-app` commit `3deaa04`, `groups` (`tag_groups` of
+  config.yaml: headings and their tags, in order) in `search.json`. The client reads both (`parse_sites`, `parse_groups`).
+  A dashboard without `groups` still works: all tags come under one heading "その他", sorted.
+- **Rule (`category.rs`, `matching`)**: the picked tags of one heading are alternatives ("or"), the headings are all
+  required ("and"); picked tags of no heading form one more heading; nothing picked matches nothing. Example: 学会 +
+  (がん or 感染症).
+- **State**: `tags` (picked categories), `exclude` (sites of a picked category that the user switched off), `follow`
+  (sites added one by one), `groups`, `onboarded`. `State::effective_follow` = `follow` + (sites matching `tags` −
+  `exclude`) on the paid plan and in the trial; on the free plan only the first 3 of `follow` (categories are kept but
+  not used). A site that joins a picked category later is followed without any action.
+- **Plan split (owner's decision)**: free = up to 3 sites chosen one by one; trial and paid = categories and no limit.
+- **Commands**: `set_tags` (refused on the free plan), `toggle_site(slug, on)` (a site brought in by a category is
+  switched off through `exclude`, others go into / out of `follow`; free limit applies), `finish_setup`.
+- **Screen**: first start (nothing followed, not `onboarded`, `groups` known) shows 「どの分野の更新を受け取りますか？」;
+  the 通知 tab has 「分野で選ぶ」 (chips per heading with the number of sites, "選んだ分野の N サイトが対象です") and the
+  long site list folded under 「サイトを個別に選ぶ・外す」.
+- `search.json` is read again after an hour when the list has no headings yet (`GROUPS_RETRY_MS`); `get_state` copies
+  `groups` together with `sites`.
+
 ---
 
 ## 5. Plans, trial and licenses (specification)
@@ -165,7 +193,7 @@ New fields must have `#[serde(default)]` behaviour (the struct has it) so that o
 
 | | Free | Trial (first 7 days) | Paid |
 | --- | --- | --- | --- |
-| Followed sites | 3 (`FREE_MAX_FOLLOWS`) | no limit | no limit |
+| Followed sites | 3 (`FREE_MAX_FOLLOWS`), one by one | no limit, one by one or by category (§4.4) | no limit, one by one or by category |
 | Looking for news | only the first run of the day (a daily digest) | every run (3 a day) | every run (3 a day) |
 
 - `State::plan(now)` returns `Plan::Pro` (paid) > `Plan::Trial` > `Plan::Free`. `Plan::unlocked()` is true for Pro and
@@ -259,13 +287,20 @@ New fields must have `#[serde(default)]` behaviour (the struct has it) so that o
 
 ### 7.2 Screen (`ui/`)
 - **Two screens, switched by tabs** (`ui/index.html`, `showView` in `app.js`):
-  - **通知**: recent updates, the sites to follow (filter, "フォロー中のみ"), 今すぐ確認, the schedule text.
+  - **通知**: recent updates, 分野で選ぶ (§4.4), the sites one by one (folded; filter, "通知の対象のみ"), 今すぐ確認, the schedule text.
   - **設定**: プラン (plan line, license-key field, Stripe buy button; hidden in a store build), ブラウザの☆から取り込む
     (import of a shared ☆ list; kept on every platform, capped by the free plan through `limit_follow`), 表示と起動
-    (font size, start at login: saved as soon as it is changed, there is no save button), 動作の確認 (test notification).
+    (font size, start at login: saved as soon as it is changed, there is no save button), 動作の確認 (test notification),
+    **このアプリについて** (version, OS and CPU, direct or store build from `View.about`; buttons for 使い方 / G醫t について /
+    プライバシー that open `<base URL>guide.html`, `about.html`, `privacy.html` in the browser; licence MPL-2.0).
+  - **Link targets are provisional (仮)**: `data-page` of the three buttons in `ui/index.html` (`guide.html`, `about.html`,
+    `privacy.html` of the dashboard); the owner has not decided the final pages.
+  - **Help is not built into the app**: it lives on the G醫t site. Those pages describe the dashboard; a page for the
+    app itself would be a change in `g-i-t-app` (ask the owner). A store listing needs the privacy URL anyway.
+  - Dates and times on the screen are always Japanese and JST (`fmt` in `app.js`), whatever the device language is.
 - `[hidden]` must stay `display: none !important` in `style.css`: `.row` / `.grid` set `display` and would otherwise
   show elements that the script hides (the license row in a store build).
-- The screens have only been checked for syntax (`node --check`) and compilation, not looked at by eye.
+- The screens were looked at on the Android emulator (x86_64) in part; the desktop windows have not been looked at by eye since the tabs were added.
 - **Settings that are deliberately not on the screen:** the dashboard URL and the check interval. The schedule comes from
   `status.json`; the base URL is fixed to the default (a different URL can still be set through `state.json` or the
   `set_options` command for development).

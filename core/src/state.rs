@@ -1,7 +1,8 @@
 //! The client's own small database: one JSON file in the app's data folder. Nothing is sent anywhere.
 
 use crate::entitlement::{self, Plan, StoreEntitlement, FREE_MAX_FOLLOWS};
-use crate::feed::Site;
+use crate::category;
+use crate::feed::{Group, Site};
 use crate::schedule::Schedule;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -28,6 +29,16 @@ pub struct Recent {
     pub history_url: String,
     /// Unix milliseconds when it was found.
     pub at: i64,
+    /// Unix milliseconds of the update itself (the newest one, for a summary); 0 in a state written before this field.
+    #[serde(default)]
+    pub updated_ms: i64,
+}
+
+impl Recent {
+    /// What the list is sorted by: the time of the update, or the time it was found when that is not known.
+    pub fn sort_key(&self) -> i64 {
+        if self.updated_ms > 0 { self.updated_ms } else { self.at }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +49,15 @@ pub struct State {
     pub interval_min: u32,
     /// Slugs of the followed sites.
     pub follow: Vec<String>,
+    /// Categories (tags) the user picked: every site that matches them is followed too, including sites that are added
+    /// later (see category.rs). Paid plan and trial only; the free plan follows `follow` alone.
+    pub tags: Vec<String>,
+    /// Sites that match `tags` but that the user switched off.
+    pub exclude: Vec<String>,
+    /// The headings of the category picker, from search.json.
+    pub groups: Vec<Group>,
+    /// True once the first-start category screen has been answered (or skipped).
+    pub onboarded: bool,
     /// slug -> ids of the entries already known (the newest `SEEN_LIMIT`).
     pub seen: HashMap<String, Vec<String>>,
     /// slug -> ETag of the last feed.
@@ -75,6 +95,10 @@ impl Default for State {
             base_url: DEFAULT_BASE_URL.to_string(),
             interval_min: 15,
             follow: vec![],
+            tags: vec![],
+            exclude: vec![],
+            groups: vec![],
+            onboarded: false,
             seen: HashMap::new(),
             etags: HashMap::new(),
             sites: vec![],
@@ -102,6 +126,7 @@ impl State {
         self.seen = polled.seen;
         self.etags = polled.etags;
         self.sites = polled.sites;
+        self.groups = polled.groups;
         self.sites_at = polled.sites_at;
         self.last_check = polled.last_check;
         self.last_error = polled.last_error;
@@ -137,10 +162,31 @@ impl State {
         }
     }
 
-    /// The followed sites that are looked at: all of them on the paid plan, the first `FREE_MAX_FOLLOWS` on the free one.
+    /// Newest update first (not "found first": a site that is looked at later must not jump to the top with an old update),
+    /// and no more than `RECENT_LIMIT`. The sort is stable, so equal times keep the order in which they were added.
+    pub fn sort_recent(&mut self) {
+        self.recent.sort_by_key(|r| std::cmp::Reverse(r.sort_key()));
+        self.recent.truncate(RECENT_LIMIT);
+    }
+
+    /// The sites that match the picked categories (before `exclude` is applied).
+    pub fn rule_matches(&self) -> Vec<String> {
+        category::matching(&self.sites, &self.groups, &self.tags)
+    }
+
+    /// The sites that are looked at. Paid plan and trial: the followed sites plus the sites of the picked categories, minus
+    /// the ones switched off. Free plan: the first `FREE_MAX_FOLLOWS` followed sites (categories are not used).
     pub fn effective_follow(&self, now_ms: i64) -> Vec<String> {
-        let n = if self.plan(now_ms).unlocked() { self.follow.len() } else { FREE_MAX_FOLLOWS };
-        self.follow.iter().take(n).cloned().collect()
+        if !self.plan(now_ms).unlocked() {
+            return self.follow.iter().take(FREE_MAX_FOLLOWS).cloned().collect();
+        }
+        let mut out = self.follow.clone();
+        for slug in self.rule_matches() {
+            if !self.exclude.contains(&slug) && !out.contains(&slug) {
+                out.push(slug);
+            }
+        }
+        out
     }
 
     /// The schedule in use: all runs of the day on the paid plan, only the first one (a daily digest) on the free one.
@@ -155,6 +201,7 @@ impl State {
     /// Forget everything that belongs to the site that was read so far (another dashboard URL).
     pub fn forget_site_data(&mut self) {
         self.sites.clear();
+        self.groups.clear();
         self.sites_at = 0;
         self.seen.clear();
         self.etags.clear();

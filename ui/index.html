@@ -12,6 +12,18 @@
     <p id="status" class="muted"></p>
   </header>
 
+  <section id="setup" hidden>
+    <h2>どの分野の更新を受け取りますか？</h2>
+    <p class="muted">分野を選ぶと、その分野のサイトの更新が通知されます。あとから新しく加わったサイトも、自動で対象になります。選び方は、あとからいつでも変えられます。</p>
+    <div id="setupChips" class="groups"></div>
+    <p id="setupCount" class="muted" role="status"></p>
+    <div class="row">
+      <button id="setupDone" type="button">この分野で始める</button>
+      <button id="setupSkip" type="button" class="ghost">あとで選ぶ</button>
+    </div>
+  </section>
+
+  <div id="appBody">
   <nav class="tabs" role="tablist" aria-label="画面">
     <button class="tab" id="tab-main" role="tab" type="button" data-view="main" aria-selected="true">通知</button>
     <button class="tab" id="tab-settings" role="tab" type="button" data-view="settings" aria-selected="false">設定</button>
@@ -25,13 +37,22 @@
     </section>
 
     <section>
+      <h2>分野で選ぶ</h2>
+      <p id="chipNote" class="muted"></p>
+      <div id="chips" class="groups"></div>
+      <p id="chipCount" class="muted"></p>
+    </section>
+
+    <section>
       <h2>通知を受け取るサイト</h2>
-      <div class="row">
-        <input id="filter" type="search" placeholder="サイト名・ドメインで絞り込む" aria-label="サイトの絞り込み" />
-        <label class="chk"><input id="only" type="checkbox" /> フォロー中のみ</label>
-        <span id="count" class="muted"></span>
-      </div>
-      <ul id="sites" class="sites"></ul>
+      <details id="siteDetails">
+        <summary>サイトを個別に選ぶ・外す <span id="count" class="muted"></span></summary>
+        <div class="row">
+          <input id="filter" type="search" placeholder="サイト名・ドメインで絞り込む" aria-label="サイトの絞り込み" />
+          <label class="chk"><input id="only" type="checkbox" /> 通知の対象のみ</label>
+        </div>
+        <ul id="sites" class="sites"></ul>
+      </details>
       <div class="row">
         <button id="checkBtn" type="button">今すぐ確認</button>
       </div>
@@ -75,11 +96,27 @@
 
     <section>
       <h2>動作の確認</h2>
+      <p id="notifyState" class="muted"></p>
       <div class="row">
+        <button id="notifyBtn" type="button" hidden>通知を許可する</button>
         <button id="testBtn" type="button">通知のテスト</button>
       </div>
     </section>
+
+    <section>
+      <h2>このアプリについて</h2>
+      <p class="muted">G醫t クライアント <span id="about"></span></p>
+      <p class="muted">使い方や考え方は、アプリの中ではなく、G醫t のサイトにまとめています。</p>
+      <!-- PROVISIONAL (仮): the targets are pages of the dashboard (<base URL> + data-page). Change data-page when the owner decides, e.g. to a page made for the app. -->
+      <div class="row">
+        <button class="ghost" type="button" data-page="guide.html">使い方</button>
+        <button class="ghost" type="button" data-page="about.html">G醫t について</button>
+        <button class="ghost" type="button" data-page="privacy.html">プライバシー</button>
+      </div>
+      <p class="muted">ライセンス: MPL-2.0</p>
+    </section>
   </main>
+  </div>
 
   <p id="msg" class="muted" role="status"></p>
 

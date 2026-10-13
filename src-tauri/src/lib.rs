@@ -5,6 +5,7 @@
 //! git_core::schedule), start at login. Mobile: the same core and screen; what happens
 //! while the app is closed is decided by the OS (see client/README.md).
 
+use git_core::category::{counts, GroupCount};
 use git_core::feed::{parse_follow_input, Site};
 use git_core::entitlement::{verify_license, Plan, Source, StoreEntitlement, FREE_MAX_FOLLOWS};
 use git_core::poller::{next_check_ms, poll_scheduled, refresh_sites, HttpFetcher, Notice};
@@ -85,7 +86,21 @@ struct View {
     plan: &'static str,
     plan_text: String,
     free_max_follows: usize,
+    /// The sites that are really looked at (followed ones, plus the picked categories on the paid plan and in the trial).
+    active: Vec<String>,
+    /// The category picker: headings with their tags and how many sites carry each.
+    groups: Vec<GroupCount>,
+    /// The categories that are picked.
+    tags: Vec<String>,
+    /// How many sites the picked categories bring in (the ones switched off not counted).
+    rule_count: usize,
+    /// True on the paid plan and in the trial: categories can be used.
+    unlocked: bool,
+    /// False until the first-start category screen has been answered; the screen shows it when nothing is followed yet.
+    onboarded: bool,
     purchase_url: &'static str,
+    /// "0.1.0 ・ Windows x86_64 ・ 直接配布": what a user tells when something goes wrong (shown under 設定).
+    about: String,
     /// True in a store build (Cargo feature `store-build`): no Stripe button, no license-key field; only the store sells.
     store_build: bool,
 }
@@ -161,6 +176,19 @@ fn view(app: &AppHandle, s: &State) -> View {
         plan: match s.plan(now_ms()) { Plan::Pro { .. } => "pro", Plan::Trial { .. } => "trial", Plan::Free => "free" },
         plan_text: plan_text(s, now_ms()),
         free_max_follows: FREE_MAX_FOLLOWS,
+        active: s.effective_follow(now_ms()),
+        groups: counts(&s.sites, &s.groups),
+        tags: s.tags.clone(),
+        rule_count: s.rule_matches().iter().filter(|x| !s.exclude.contains(x)).count(),
+        unlocked: s.plan(now_ms()).unlocked(),
+        onboarded: s.onboarded,
+        about: format!(
+            "{} ・ {} {} ・ {}",
+            app.package_info().version,
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+            if STORE_BUILD { "ストア版" } else { "直接配布" }
+        ),
         purchase_url: if STORE_BUILD { "" } else { STRIPE_PAYMENT_LINK },
         store_build: STORE_BUILD,
     }
@@ -179,6 +207,7 @@ async fn get_state(app: AppHandle, shared: tauri::State<'_, SharedState>) -> Res
             if refresh_sites(&mut copy, &HttpFetcher::new(), now_ms()).is_ok() {
                 let mut s = sh.state.lock().unwrap();
                 s.sites = copy.sites;
+                s.groups = copy.groups;
                 s.sites_at = copy.sites_at;
                 save(&sh, &s);
             }
@@ -201,6 +230,70 @@ fn set_follow(app: AppHandle, shared: tauri::State<'_, SharedState>, slugs: Vec<
     let _ = &app;
     let _ = shared.wake.lock().unwrap().send(()); // remember the newly followed sites now, not at the next window
     follow
+}
+
+/// Picks the categories whose sites are followed (and every site that joins them later). Only the paid plan and the trial.
+#[tauri::command]
+fn set_tags(app: AppHandle, shared: tauri::State<'_, SharedState>, tags: Vec<String>) -> Result<(), String> {
+    let mut s = shared.state.lock().unwrap();
+    if !tags.is_empty() && !s.plan(now_ms()).unlocked() {
+        return Err("分野での選択は、お試し期間中と有料プランで使えます。".into());
+    }
+    let mut picked: Vec<String> = Vec::new();
+    for t in tags {
+        if s.sites.iter().any(|x| x.tags.contains(&t)) && !picked.contains(&t) {
+            picked.push(t);
+        }
+    }
+    s.tags = picked;
+    let matches = s.rule_matches();
+    s.exclude.retain(|x| matches.contains(x)); // switching a site off only means something while a category brings it in
+    save(&shared, &s);
+    #[cfg(desktop)]
+    desktop::refresh_tray(&app, &s);
+    let _ = &app;
+    let _ = shared.wake.lock().unwrap().send(()); // look at the new sites now: they are only remembered (no flood)
+    Ok(())
+}
+
+/// Switches one site on or off. A site that a picked category brings in is switched off through `exclude`; any other site
+/// goes into or out of the followed list (the free plan's limit applies to that list). Returns the sites now looked at.
+#[tauri::command]
+fn toggle_site(app: AppHandle, shared: tauri::State<'_, SharedState>, slug: String, on: bool) -> Vec<String> {
+    let slug = parse_follow_input(&slug).into_iter().next().unwrap_or_default();
+    let mut s = shared.state.lock().unwrap();
+    if !slug.is_empty() {
+        let unlocked = s.plan(now_ms()).unlocked();
+        let by_category = unlocked && s.rule_matches().contains(&slug);
+        if on {
+            s.exclude.retain(|x| x != &slug);
+            if !by_category && !s.follow.contains(&slug) {
+                let mut wanted = s.follow.clone();
+                wanted.push(slug.clone());
+                let old = s.follow.clone();
+                s.follow = limit_follow(&old, wanted, unlocked);
+            }
+        } else {
+            s.follow.retain(|x| x != &slug);
+            if by_category && !s.exclude.contains(&slug) {
+                s.exclude.push(slug.clone());
+            }
+        }
+        save(&shared, &s);
+        #[cfg(desktop)]
+        desktop::refresh_tray(&app, &s);
+        let _ = shared.wake.lock().unwrap().send(());
+    }
+    let _ = &app;
+    s.effective_follow(now_ms())
+}
+
+/// The first-start category screen has been answered (or skipped).
+#[tauri::command]
+fn finish_setup(shared: tauri::State<'_, SharedState>) {
+    let mut s = shared.state.lock().unwrap();
+    s.onboarded = true;
+    save(&shared, &s);
 }
 
 #[derive(Serialize)]
@@ -335,13 +428,13 @@ fn spawn_checker(app: AppHandle, shared: SharedState, rx: std::sync::mpsc::Recei
         let mut target = now_ms() + 10_000; // the first look shortly after the start
         loop {
             let manual = wait_until(&rx, target);
-            let follows = !shared.state.lock().unwrap().follow.is_empty();
+            let follows = !shared.state.lock().unwrap().effective_follow(now_ms()).is_empty();
             if follows || manual {
                 check(&app, &shared);
             }
             let at = {
                 let s = shared.state.lock().unwrap();
-                if s.follow.is_empty() { now_ms() + 10 * 60_000 } else { next_check_ms(&s, now_ms()) }
+                if s.effective_follow(now_ms()).is_empty() { now_ms() + 10 * 60_000 } else { next_check_ms(&s, now_ms()) }
             };
             target = at + jitter_ms();
         }
@@ -365,7 +458,8 @@ mod desktop {
 
     fn build_menu(app: &AppHandle, s: &State) -> tauri::Result<Menu<tauri::Wry>> {
         let when = if s.last_check == 0 { "まだ確認していません".to_string() } else { format!("最終確認: {}", format_local(s.last_check)) };
-        let next = if s.follow.is_empty() { "次回の確認: （サイトを選んでください）".to_string() } else { format!("次回の確認: {}", format_local(next_check_ms(s, now_ms()))) };
+        let active = s.effective_follow(now_ms());
+        let next = if active.is_empty() { "次回の確認: （サイトを選んでください）".to_string() } else { format!("次回の確認: {}", format_local(next_check_ms(s, now_ms()))) };
         let mut recent_items: Vec<MenuItem<tauri::Wry>> = Vec::new();
         for (i, r) in s.recent.iter().take(8).enumerate() {
             let label = format!("{}  {}", r.name, r.time);
@@ -377,7 +471,7 @@ mod desktop {
         Menu::with_items(
             app,
             &[
-                &MenuItem::with_id(app, "info", format!("フォロー中: {} サイト", s.follow.len()), false, None::<&str>)?,
+                &MenuItem::with_id(app, "info", format!("フォロー中: {} サイト", active.len()), false, None::<&str>)?,
                 &MenuItem::with_id(app, "when", when, false, None::<&str>)?,
                 &MenuItem::with_id(app, "next", next, false, None::<&str>)?,
                 &PredefinedMenuItem::separator(app)?,
@@ -421,7 +515,7 @@ mod desktop {
             if let Ok(menu) = build_menu(app, s) {
                 let _ = tray.set_menu(Some(menu));
             }
-            let _ = tray.set_tooltip(Some(format!("G醫t（{} サイトをフォロー中）", s.follow.len())));
+            let _ = tray.set_tooltip(Some(format!("G醫t（{} サイトをフォロー中）", s.effective_follow(now_ms()).len())));
         }
     }
 
@@ -474,6 +568,12 @@ mod desktop {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Linux: WebKitGTK's DMABUF renderer shows an empty window on some graphics stacks (seen under WSLg; known for NVIDIA).
+    // This screen is plain HTML, so the plain renderer costs nothing. A value set by the user is kept.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     let mut builder = tauri::Builder::default();
 
     #[cfg(desktop)]
@@ -496,7 +596,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 desktop::setup(app.handle(), &shared)?;
-                if shared.state.lock().unwrap().follow.is_empty() {
+                if { let s = shared.state.lock().unwrap(); !s.onboarded && s.follow.is_empty() && s.tags.is_empty() } {
                     desktop::show_window(app.handle()); // first start: choose the sites
                 }
             }
@@ -515,7 +615,7 @@ pub fn run() {
             }
             let _ = (window, event);
         })
-        .invoke_handler(tauri::generate_handler![get_state, set_follow, import_follow, set_options, set_license, set_store_entitlement, check_now, test_notification, open_external])
+        .invoke_handler(tauri::generate_handler![get_state, set_follow, set_tags, toggle_site, finish_setup, import_follow, set_options, set_license, set_store_entitlement, check_now, test_notification, open_external])
         .run(tauri::generate_context!())
         .expect("error while running G醫t client");
 }

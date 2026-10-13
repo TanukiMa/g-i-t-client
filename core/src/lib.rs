@@ -2,6 +2,7 @@
 //! publishes (the per-site Atom feeds and `search.json`), the small local state, and one check of all followed sites.
 //! No Tauri, no OS calls: the platform shells only hand in a `Fetcher` and a notification callback.
 
+pub mod category;
 pub mod entitlement;
 pub mod feed;
 pub mod poller;

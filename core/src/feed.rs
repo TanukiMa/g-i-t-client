@@ -45,6 +45,14 @@ pub struct Site {
     pub tags: Vec<String>,
 }
 
+/// A heading of the category picker (`tag_groups` of the site's config.yaml) with its tags, in the order the site gives them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Group {
+    pub name: String,
+    pub tags: Vec<String>,
+}
+
 pub fn is_slug(s: &str) -> bool {
     let mut chars = s.chars();
     match chars.next() {
@@ -185,6 +193,22 @@ pub fn parse_sites(json: &str) -> Result<Vec<Site>, String> {
             })
         })
         .collect())
+}
+
+/// The `groups` of search.json: `[[heading, [tag, ...]], ...]`. A site that does not publish them (or a file that cannot
+/// be read) gives an empty list: the categories then simply come without headings.
+pub fn parse_groups(json: &str) -> Vec<Group> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return vec![] };
+    let Some(list) = v.get("groups").and_then(|g| g.as_array()) else { return vec![] };
+    list.iter()
+        .filter_map(|row| {
+            let r = row.as_array()?;
+            Some(Group {
+                name: r.first()?.as_str()?.to_string(),
+                tags: r.get(1)?.as_array()?.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+            })
+        })
+        .collect()
 }
 
 fn percent_decode(s: &str) -> String {
