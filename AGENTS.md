@@ -102,8 +102,11 @@ g-i-t-client/
 ├── scripts/make-debian-orig.sh   makes ../giiit_<version>.orig.tar.xz (source + `cargo vendor`)
 ├── ui/                   plain HTML/JS/CSS, no bundler (index.html, app.js, style.css)
 ├── icon.png              source of the icons (`npm run icons`)
-├── .github/workflows/build.yml   manual, unsigned bundles (Windows/macOS/Android/iOS simulator) — [partly]: only the Windows build and the core tests have run
+├── .github/workflows/build.yml   manual, unsigned bundles (Windows/macOS/Android/iOS simulator) — [partly]: not run on GitHub yet; the Windows build, the Android debug APK and the Linux packages were built locally
 ├── README.md             user-facing documentation
+├── ChangeLog.md          what changed, by area (update it with every change that a user or a developer would notice)
+├── TRADEMARK.md          name and logo policy (draft; the owner fills the FIXME lines)
+├── LICENSE               MPL-2.0
 └── AGENTS.md             this file
 ```
 
@@ -112,7 +115,7 @@ g-i-t-client/
 ## 3. Commands
 
 ```powershell
-cargo test -p git_core          # core tests, offline (currently 14 + 4 + 13 + 0 doc)
+cargo test -p git_core          # core tests, offline (currently 5 + 12 + 14 + 4 + 13 = 48, 0 doc)
 cargo check -p git-client       # the Tauri shell compiles (first run takes minutes; run it in the background)
 npm install; npm run dev        # run the app
 npm run build                   # installer in target/release/bundle
@@ -237,6 +240,13 @@ New fields must have `#[serde(default)]` behaviour (the struct has it) so that o
 - `state.json` is plain JSON: whoever edits `store` or `trialStartedMs` unlocks the paid plan. A license key can be
   shared. This is the price of "no server".
 - Store results are trusted as handed in by the shell; there is no server-side receipt validation.
+- **The source is public (MPL-2.0), so anyone can build a copy without the limits.** `FREE_MAX_FOLLOWS`, the schedule rule
+  and the key check are ordinary code. A build-time gate (a passphrase in an environment variable whose hash must match a
+  hash in the source) was considered and **rejected as protection**: the hash and the check are in the same source, so the
+  check is deleted or the hash replaced in one line, and the limits can be edited directly without touching the gate.
+  What the owner can rely on instead: the official signed/notarized builds and the stores' own distribution, the name
+  and icon (trademark, not covered by the licence), and the fact that everything the app reads is public anyway.
+  Do not add a build gate and do not describe the limits as "protected".
 
 ### 5.6 Testers and developers
 - Preferred: a signed, time-limited license key (`license_tool sign ... <days>`); it goes through the same code as a
@@ -315,13 +325,13 @@ New fields must have `#[serde(default)]` behaviour (the struct has it) so that o
 | | Windows | macOS | Android | iOS / iPadOS |
 | --- | --- | --- | --- | --- |
 | Screen, follow list, check, notifications | [done] (built and run) | [partly] (same code, not run) | [partly] (same code) | [partly] (same code) |
-| Checking while the app is closed | [done] tray + timer + autostart | [partly] same code | [todo] WorkManager (≥ 15 min) or a foreground service, native Kotlin | [todo] no reliable background run; needs push (APNs/FCM) |
+| Checking while the app is closed | [done] tray + timer + autostart | [partly] same code | [partly] WorkManager job (Kotlin + JNI + `git_core::background`), see §8b | [todo] no reliable background run; needs push (APNs/FCM) |
 | Store billing | [todo] Microsoft Store | [todo] App Store (StoreKit 2) | [todo] Google Play Billing | [todo] StoreKit 2 |
 | Signing / distribution | unsigned (SmartScreen warns) | needs notarization | needs signing | needs the Apple Developer Program |
 
 watchOS and tvOS are not Tauri targets.
 
-### 8a. Mobile background checking (decision record; all **[todo]**, nothing below is written)
+### 8a. Mobile background checking (decision record; Android is written, see §8b; iOS is **[todo]**)
 
 Decided by the owner:
 - **iOS: `BGAppRefreshTask` first, no server.** It is best effort: the OS decides when it runs, and it does not run at all
@@ -341,12 +351,11 @@ Decided by the owner:
   will be late or missing, with a button that opens the app's page in Settings (`UIApplication.openSettingsURLString`).
 - **Notification permission:** ask with `requestAuthorization` at the first start, after a one-line explanation on the
   screen (not as a bare system dialog); if it is refused, show the guidance above.
-- **Android** is the same idea with WorkManager (periodic, 15 min minimum, OS decides): same scheduling rule, same
-  "detect and guide" screen (notification permission on Android 13+, battery restrictions).
+- **Android** is the same idea with WorkManager (one-time jobs, chained; the OS decides when they run): same scheduling
+  rule, same "detect and guide" screen (notification permission on Android 13+, battery restrictions: see §8b).
 - Code form: Swift/Kotlin is a Tauri mobile plugin that calls the Rust core; do not write a bridge by hand when a crate
   (e.g. UniFFI) or Tauri's plugin mechanism does it (principle 6). The screen shows a "通知の状態" block only on mobile.
-- Not possible to build here: `src-tauri/gen/apple` and `gen/android` do not exist yet (`tauri ios init` / `android init`);
-  iOS needs a Mac with Xcode. Do not claim any of this works until it has run on a real device (the simulator does not
+- `src-tauri/gen/android` exists; `src-tauri/gen/apple` does not (`tauri ios init`); iOS needs a Mac with Xcode. Do not claim any of this works until it has run on a real device (the simulator does not
   fire background tasks; use the debugger command `_simulateLaunchForTaskWithIdentifier`).
 
 **Policy confirmed by the owner:** iOS starts with `BGAppRefreshTask`; it is booked at the start of the `status.json`
@@ -360,6 +369,55 @@ the privacy text (Google receives the device token). Ask the owner before starti
 An idea for phone notifications without a user database: one FCM topic per followed site (`site-<slug>`), the device
 subscribes, and the pipeline publishes one message per updated site. Not written; needs a server-side change in
 `g-i-t-app` and an owner decision.
+
+### 8b. Android background job **[partly]**
+
+Written and looked at on the emulator (x86_64): a forced job ran with the app in the background and with **no app process**
+(after `am crash`; the process was started for the job), looked, saved, and showed the notification, and tapping it opened the
+diff page in the browser. **Not tried on a real phone, not tried over days, not tried under Doze.**
+- **Core** (`core/src/background.rs`, tested offline): `run(state_file, fetcher, now)` takes the lock of the state file, loads
+  the state, looks like the timer thread (`poll_scheduled`), saves, and returns `{notices, next_ms, error}`; `next()` returns
+  only the next time. Nothing followed, or no state file yet: no network, nothing written (a job must not create a state and
+  start the trial for an app that was never set up), next try in 30 minutes.
+- **Lock** (`state::FileLock`, `<state>.lock`, Rust 1.89 `File::lock`): the app's `check()` holds it for a whole look, the job
+  holds it for a whole look. The app's other saves use `try_acquire` (a command must not wait for the network) and first
+  take over what the job saved (`absorb_disk`: `merge_poll` of the disk state if its `last_check` is newer), so an older
+  `seen` is never saved over a newer one (the same update would be announced twice).
+- **Rust entry points** (`src-tauri/src/lib.rs`, `mod android_job`, crate `jni`): `Java_jp_git_1app_client_BackgroundCheck_nativeCheck`
+  (returns JSON `{"notices":[{"title","body","url"}],"nextMs","error"}`) and `..._nativeNext`; panics are caught. The tap target
+  is the diff page of one update, the history page of several, the dashboard for the summary notification.
+- **Kotlin** (`src-tauri/gen/android/app/src/main/java/jp/git_app/client/`): `BackgroundCheck` (loads `git_client_lib`, books
+  `OneTimeWorkRequest` "giiit-check" with `NetworkType.CONNECTED`, `ExistingWorkPolicy.REPLACE`, delay = next time + 0–45 s,
+  at least 1 minute), `CheckWorker` (does nothing but book the next job while the app is on the screen, because the app's own
+  thread looks then; otherwise `nativeCheck`, shows the notifications on channel `updates` with a tap to the browser, http(s)
+  only, then books the next job; a failed look books a retry in 15 minutes), `MainActivity` (books a job when it is created and
+  when it is left). The data folder is `Context.dataDir` (`state.json` lies directly in it).
+- **Gradle**: `androidx.work:work-runtime`; **ProGuard/R8** (`proguard-rules.pro`): keep `BackgroundCheck` (JNI),
+  the `@JavascriptInterface` methods of `DeviceBridge`, and the constructor of `WorkDatabase_Impl` (without it the **release** build
+  died at start: `NoSuchMethodException: androidx.work.impl.WorkDatabase_Impl.<init>`; the debug build is not minified and never showed it).
+  **Release build** (`npx tauri android build --apk`, unsigned; all four ABIs `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64` are in it,
+  28.9 MB; the debug APK is 162-334 MB): to try it, `zipalign` + `apksigner` with the debug key, then install. Started on the emulator,
+  the forced job ran and booked the next one. A release build cannot be inspected through DevTools or `run-as`, so the JNI look itself
+  (with a followed site) was not tried in the minified build.
+- **Detect and guide** (`DeviceBridge.kt`, exposed to the page as `window.GiiitAndroid` by `MainActivity.onWebViewCreate`; read
+  only): `status()` returns `{notifications, ignoringBatteryOptimizations, backgroundRestricted, standbyBucket}`; 設定 → 動作の確認
+  shows 「端末の状態」 only when the bridge exists: a warning when background use is restricted (the job cannot run) or the app
+  is in the "rare"/"restricted" standby bucket, and a hint when the app is subject to battery optimization; two buttons open
+  the system's pages (the app's settings, the battery optimization list) through `openAppSettings()` / `openBatterySettings()`.
+  The state is read again when the user comes back to the app. **The app never asks for the battery exemption itself**
+  (`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` is restricted by Google Play): the user changes it on the system page. The
+  bridge is the one place where the page talks to native code without `invoke`; it only reads the phone's state and opens
+  system pages, and the WebView shows only the app's own files (strict CSP). Looked at on the emulator through DevTools; the
+  buttons were not pressed there and have not been tried on a real phone.
+- **Known limits**: Android decides when a job runs (Doze, battery saver, app standby); a force-stopped app runs nothing until
+  it is opened again; the job does not ask for the notification permission (the app does, after the first-start screen) and
+  shows nothing without it (the look is still made, the updates are listed in the app); a job started by the system with no
+  app process pays for starting the process (slow on the emulator).
+- **To test by hand** (emulator): `adb shell cmd jobscheduler run -f -n androidx.work.systemjobscheduler jp.git_app.client <id>`
+  with the id from `adb shell dumpsys jobscheduler | grep CheckWorker` (it changes after every run). To make an update look
+  new, remove its key from `seen[<slug>]` and its entry from `heads` in `state.json` (`run-as`; bump `lastCheck` by 1 so that
+  the running app takes it over). Do not use `am force-stop` (it removes the jobs) or `am kill` (WorkManager takes it for a force stop, books its jobs again and that
+  cancels the forced run); to test without an app process use `am crash jp.git_app.client` first. On Git Bash set `MSYS_NO_PATHCONV=1`.
 
 ---
 
@@ -398,7 +456,8 @@ GPL/AGPL were rejected: store terms conflict with them and AGPL's network clause
 server. Consequences for agents:
 - Only add dependencies whose licence is compatible with MPL-2.0 (MIT, Apache-2.0, BSD, ISC, MPL-2.0, Zlib, Unicode;
   **not** GPL/AGPL/LGPL-static without asking). Check with `cargo deny check licenses` or `cargo license`.
-- The licence covers the code, not the name "G醫t" or the icon (trademark/branding is a separate decision of the owner).
+- The licence covers the code, not the name "G醫t" / "giiit" or the icon: see `TRADEMARK.md` (draft). A fork or a modified build
+  must not use the name or the icon; do not put the name or the icon into a new store listing for anyone else.
 - The operator private key and `.env` are never part of the repository, whatever the licence.
 - If the owner later accepts outside contributions, ask about a CLA before merging them.
 
@@ -413,7 +472,9 @@ server. Consequences for agents:
 - Long builds (`cargo check -p git-client`, `npm run build`) take minutes: run them in the background and wait for the
   result instead of guessing.
 - Write tests next to the behaviour (`core/tests/`); a plan or schedule rule without a test is not finished.
-- Keep `README.md` in step: it currently still says `client/` paths, "12 tests" and a workflow called `client.yml` from before
-  the repository moved; the real workflow is `.github/workflows/build.yml`. Fix such drift when you touch the section.
+- Keep `README.md` in step with the code (paths, commands, platform table, plan table); it was rewritten on 2026-10-14. The
+  workflow is `.github/workflows/build.yml`. Fix drift when you touch a section.
+- Keep `ChangeLog.md` in step: add a line under "Unreleased" for every change that a user or a developer would notice (what was
+  added, changed or fixed, and what is still not done).
 - Commit messages: short imperative English or Japanese, one topic per commit. Do not commit `target/`, `node_modules/`,
   keys or `.env`.
