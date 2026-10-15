@@ -19,3 +19,15 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# JNI: the Rust library finds these methods by name
+-keep class jp.git_app.client.BackgroundCheck { *; }
+
+# The page calls these methods by name (window.GiiitAndroid)
+-keepclassmembers class jp.git_app.client.DeviceBridge {
+    @android.webkit.JavascriptInterface <methods>;
+}
+
+# WorkManager makes its Room database by reflection; a release build removed the constructor and the app died at start
+-keep class androidx.work.impl.WorkDatabase_Impl { <init>(); }
+-keep class * extends androidx.room.RoomDatabase { <init>(); }

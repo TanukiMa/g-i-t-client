@@ -32,7 +32,24 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
 }
 
-fn save(shared: &Shared, state: &State) {
+/// What the background job of a phone looked at and remembered since the app last saved is taken over first, so that the app
+/// never saves an older `seen` over it (the same update would be announced twice).
+fn absorb_disk(shared: &Shared, state: &mut State) {
+    if shared.file.exists() {
+        let disk = state::load(&shared.file);
+        if disk.last_check > state.last_check {
+            state.merge_poll(disk);
+        }
+    }
+}
+
+/// Saves the state. Takes the lock of the state file if it is free; if a check holds it (a look can take seconds, and a
+/// command must not wait for the network) the state is written without it: that check merges and saves again when it ends.
+fn save(shared: &Shared, state: &mut State) {
+    let lock = state::FileLock::try_acquire(&shared.file);
+    if lock.is_some() {
+        absorb_disk(shared, state);
+    }
     let _ = state::save(&shared.file, state);
 }
 
@@ -50,13 +67,20 @@ fn show_notice(app: &AppHandle, n: &Notice) {
 
 /// One check: works on a copy of the state (the network can be slow), then merges what it found.
 fn check(app: &AppHandle, shared: &Shared) {
-    let mut polled = shared.state.lock().unwrap().clone();
+    // The lock is held for the whole look: the background job of a phone takes the same one, so the two never work on the
+    // state at the same time (see git_core::background).
+    let _lock = state::FileLock::acquire(&shared.file).ok();
+    let mut polled = {
+        let mut s = shared.state.lock().unwrap();
+        absorb_disk(shared, &mut s);
+        s.clone()
+    };
     let fetcher = HttpFetcher::new();
     let _ = poll_scheduled(&mut polled, &fetcher, &mut |n| show_notice(app, n), now_ms());
     let snapshot = {
         let mut s = shared.state.lock().unwrap();
         s.merge_poll(polled);
-        save(shared, &s);
+        let _ = state::save(&shared.file, &s); // the lock is already ours
         s.clone()
     };
     #[cfg(desktop)]
@@ -209,7 +233,7 @@ async fn get_state(app: AppHandle, shared: tauri::State<'_, SharedState>) -> Res
                 s.sites = copy.sites;
                 s.groups = copy.groups;
                 s.sites_at = copy.sites_at;
-                save(&sh, &s);
+                save(&sh, &mut s);
             }
         })
         .await;
@@ -224,7 +248,7 @@ fn set_follow(app: AppHandle, shared: tauri::State<'_, SharedState>, slugs: Vec<
     let mut s = shared.state.lock().unwrap();
     let follow = limit_follow(&s.follow, follow, s.plan(now_ms()).unlocked());
     s.follow = follow.clone();
-    save(&shared, &s);
+    save(&shared, &mut s);
     #[cfg(desktop)]
     desktop::refresh_tray(&app, &s);
     let _ = &app;
@@ -248,7 +272,7 @@ fn set_tags(app: AppHandle, shared: tauri::State<'_, SharedState>, tags: Vec<Str
     s.tags = picked;
     let matches = s.rule_matches();
     s.exclude.retain(|x| matches.contains(x)); // switching a site off only means something while a category brings it in
-    save(&shared, &s);
+    save(&shared, &mut s);
     #[cfg(desktop)]
     desktop::refresh_tray(&app, &s);
     let _ = &app;
@@ -279,7 +303,7 @@ fn toggle_site(app: AppHandle, shared: tauri::State<'_, SharedState>, slug: Stri
                 s.exclude.push(slug.clone());
             }
         }
-        save(&shared, &s);
+        save(&shared, &mut s);
         #[cfg(desktop)]
         desktop::refresh_tray(&app, &s);
         let _ = shared.wake.lock().unwrap().send(());
@@ -293,7 +317,7 @@ fn toggle_site(app: AppHandle, shared: tauri::State<'_, SharedState>, slug: Stri
 fn finish_setup(shared: tauri::State<'_, SharedState>) {
     let mut s = shared.state.lock().unwrap();
     s.onboarded = true;
-    save(&shared, &s);
+    save(&shared, &mut s);
 }
 
 #[derive(Serialize)]
@@ -316,7 +340,7 @@ fn import_follow(app: AppHandle, shared: tauri::State<'_, SharedState>, text: St
     let old = s.follow.clone();
     s.follow = limit_follow(&old, wanted, s.plan(now_ms()).unlocked());
     let add: Vec<String> = s.follow[before..].to_vec();
-    save(&shared, &s);
+    save(&shared, &mut s);
     #[cfg(desktop)]
     desktop::refresh_tray(&app, &s);
     let _ = &app;
@@ -343,7 +367,7 @@ fn set_options(app: AppHandle, shared: tauri::State<'_, SharedState>, base_url: 
         let _ = if on { app.autolaunch().enable() } else { app.autolaunch().disable() };
     }
     let _ = (&app, open_at_login);
-    save(&shared, &s);
+    save(&shared, &mut s);
     let _ = shared.wake.lock().unwrap().send(()); // re-read the interval
     Ok(())
 }
@@ -360,7 +384,7 @@ fn set_license(app: AppHandle, shared: tauri::State<'_, SharedState>, key: Strin
     }
     let mut s = shared.state.lock().unwrap();
     s.license = key;
-    save(&shared, &s);
+    save(&shared, &mut s);
     #[cfg(desktop)]
     desktop::refresh_tray(&app, &s);
     let _ = &app;
@@ -374,7 +398,7 @@ fn set_license(app: AppHandle, shared: tauri::State<'_, SharedState>, key: Strin
 fn set_store_entitlement(shared: tauri::State<'_, SharedState>, source: Source, expires_ms: i64) {
     let mut s = shared.state.lock().unwrap();
     s.store = (expires_ms > 0).then(|| StoreEntitlement { source, expires_ms, checked_ms: now_ms() });
-    save(&shared, &s);
+    save(&shared, &mut s);
     let _ = shared.wake.lock().unwrap().send(());
 }
 
@@ -563,6 +587,56 @@ mod desktop {
             })
             .build(app)?;
         Ok(())
+    }
+}
+
+/// Android: what Kotlin's `BackgroundCheck` calls (the job of WorkManager, which runs without the window and without the
+/// timer thread). The work is `git_core::background`; this only moves strings and numbers across.
+#[cfg(target_os = "android")]
+mod android_job {
+    use super::now_ms;
+    use git_core::background;
+    use git_core::poller::{HttpFetcher, Notice};
+    use jni::objects::{JClass, JString};
+    use jni::sys::{jlong, jstring};
+    use jni::JNIEnv;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::path::PathBuf;
+
+    fn state_file(env: &mut JNIEnv, dir: &JString) -> Option<PathBuf> {
+        let dir: String = env.get_string(dir).ok()?.into();
+        Some(PathBuf::from(dir).join("state.json"))
+    }
+
+    /// What is opened when the notification is tapped: the diff page of one update, the history of several.
+    fn target(n: &Notice) -> &str {
+        if n.count > 1 || n.slug.is_empty() { &n.history_url } else { &n.diff_url }
+    }
+
+    /// `{"notices":[{"title","body","url"}],"nextMs":..., "error":"..."}`
+    #[no_mangle]
+    pub extern "system" fn Java_jp_git_1app_client_BackgroundCheck_nativeCheck<'l>(mut env: JNIEnv<'l>, _class: JClass<'l>, dir: JString<'l>) -> jstring {
+        let json = catch_unwind(AssertUnwindSafe(|| match state_file(&mut env, &dir) {
+            Some(path) => {
+                let o = background::run(&path, &HttpFetcher::new(), now_ms());
+                let notices: Vec<serde_json::Value> =
+                    o.notices.iter().map(|n| serde_json::json!({ "title": n.title, "body": n.body, "url": target(n) })).collect();
+                serde_json::json!({ "notices": notices, "nextMs": o.next_ms, "error": o.error }).to_string()
+            }
+            None => serde_json::json!({ "notices": [], "nextMs": now_ms() + 30 * 60_000, "error": "no data directory" }).to_string(),
+        }))
+        .unwrap_or_else(|_| serde_json::json!({ "notices": [], "nextMs": now_ms() + 30 * 60_000, "error": "panic" }).to_string());
+        env.new_string(json).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
+    }
+
+    /// When the next look is due (Unix ms), without looking.
+    #[no_mangle]
+    pub extern "system" fn Java_jp_git_1app_client_BackgroundCheck_nativeNext<'l>(mut env: JNIEnv<'l>, _class: JClass<'l>, dir: JString<'l>) -> jlong {
+        catch_unwind(AssertUnwindSafe(|| match state_file(&mut env, &dir) {
+            Some(path) => background::next(&path, now_ms()),
+            None => now_ms() + 30 * 60_000,
+        }))
+        .unwrap_or_else(|_| now_ms() + 30 * 60_000)
     }
 }
 

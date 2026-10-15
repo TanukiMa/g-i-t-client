@@ -28,3 +28,7 @@ git_core = { path = "../core" }
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
+
+# Android only: the entry points that the background job (WorkManager, Kotlin) calls
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"

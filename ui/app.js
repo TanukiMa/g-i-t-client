@@ -126,6 +126,30 @@
     return ok;
   }
 
+  // Android only: the app's own bridge (DeviceBridge.kt) tells what keeps a phone from looking on time. It changes nothing: the
+  // buttons open the system's own settings pages.
+  const bridge = window.GiiitAndroid;
+  function showDeviceState() {
+    if (!bridge) return;
+    $("deviceBox").hidden = false;
+    let st;
+    try { st = JSON.parse(bridge.status()); } catch { return; }
+    const lines = [];
+    if (st.backgroundRestricted) lines.push("バックグラウンドの動作が制限されています。このままでは、アプリを閉じている間の確認ができません。「アプリの設定」で、電池の項目を「制限なし」か「最適化」にしてください。");
+    else if (st.standbyBucket >= 45) lines.push("このアプリは「制限」の状態で、確認の回数がごく少なくなっています。アプリを開くと、改善します。");
+    else if (st.standbyBucket >= 40) lines.push("このアプリはあまり使われていないため、確認の回数が制限されています。時々アプリを開くと、改善します。");
+    lines.push(st.ignoringBatteryOptimizations
+      ? "電池の最適化の対象外です（確認は、決まった時刻に近く行われます）。"
+      : "電池の最適化の対象です（標準の設定）。通知が遅れる場合は、「電池の設定」で、このアプリを「最適化しない」にすると改善することがあります。");
+    $("deviceState").textContent = lines.join(" ");
+  }
+  if (bridge) {
+    $("appSettingsBtn").addEventListener("click", () => bridge.openAppSettings());
+    $("batterySettingsBtn").addEventListener("click", () => bridge.openBatterySettings());
+    // the user comes back from the system's settings page: show the new state
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) { showDeviceState(); showNotifyState(); } });
+  }
+
   function applySize(v) {
     if (!["small", "normal", "large", "huge"].includes(v)) v = "normal";
     document.documentElement.dataset.size = v; $("fontSize").value = v;
@@ -207,4 +231,5 @@
   if (/android|iphone|ipad/i.test(navigator.userAgent)) { $("login").hidden = true; $("loginLabel").hidden = true; }
   load();
   showNotifyState();
+  showDeviceState();
 })();
