@@ -73,9 +73,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: . }
       - run: npm install
-      - run: npx tauri android build --apk
-        env:
-          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+      - name: Build the APK (all four ABIs)
+        run: |
+          export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          npx tauri android build --apk
       - name: Check the four ABIs
         run: |
           apk=$(ls src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk)
