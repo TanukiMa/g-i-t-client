@@ -29,10 +29,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: . }
       - run: npm install
-      - uses: tauri-apps/tauri-action@v0
+      - run: npx tauri build
+      # tauri-action's own artifact upload put nothing into the run, so the bundles are uploaded here (unsigned).
+      - uses: actions/upload-artifact@v4
         with:
-          projectPath: .
-          uploadWorkflowArtifacts: true
+          name: g-i-t-client-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/msi/*.msi
+            target/release/bundle/dmg/*.dmg
+            target/release/bundle/macos/*.app.tar.gz
 
   # Linux: the Debian package of Tauri (amd64). The deb of `debian/` (own apt repository) is built by hand, see AGENTS.md section 1a.
   linux-deb:
