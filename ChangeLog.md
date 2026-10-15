@@ -119,6 +119,11 @@ background checking, open decisions, working rules); `README.md` rewritten to th
   not by the build.
 - MPL-2.0 chosen (not GPL/AGPL: store terms; AGPL's network clause means nothing for a client without a server).
 
+### Added (Google Play Billing)
+
+- Android store build: `BillingBridge.kt` (Play Billing Library 8.3.0), purchase buttons for monthly 1,000 yen / yearly 10,000 yen
+  (excluding tax) in 設定 → プラン, "manage subscription" link. Compiles; the purchase itself is untested (needs a Play Console test track).
+
 ### Fixed (release build)
 
 - Android release (R8) build crashed at start (`WorkDatabase_Impl` constructor removed); keep rules added for it and for `DeviceBridge`.

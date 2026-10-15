@@ -409,6 +409,15 @@ diff page in the browser. **Not tried on a real phone, not tried over days, not 
   bridge is the one place where the page talks to native code without `invoke`; it only reads the phone's state and opens
   system pages, and the WebView shows only the app's own files (strict CSP). Looked at on the emulator through DevTools; the
   buttons were not pressed there and have not been tried on a real phone.
+- **Google Play Billing [partly]** (`BillingBridge.kt`, `window.GiiitBilling`, library `com.android.billingclient:billing:8.3.0`; shown only in a
+  store build, `--features store-build`): one subscription `giiit_pro` with the base plans `monthly` (1,000 yen) and `yearly` (10,000 yen)
+  (prices excluding tax, set in the Play Console, shown from Play's own `formattedPrice`). `refresh()` reads the offers and
+  `queryPurchasesAsync`; a PURCHASED subscription is acknowledged and reported to the page (`giiitBillingChanged`), which calls
+  `set_store_entitlement("google-play", now + 3 days)`; "none active" (from a SUCCESSFUL query only) clears it. **No server, so the real
+  expiry is not read from the Play Developer API**: the short expiry is renewed at every start and every return to the app, and the 7-day
+  grace of the core covers being offline. Not tried: it compiles and the bridge and the box appear on the emulator (which has no Play
+  connection: the note says so); **the purchase flow needs the app on a Play Console test track with the subscription and license
+  testers set up**. Product ID, base-plan IDs and prices are the owner's to create in the Play Console.
 - **Known limits**: Android decides when a job runs (Doze, battery saver, app standby); a force-stopped app runs nothing until
   it is opened again; the job does not ask for the notification permission (the app does, after the first-start screen) and
   shows nothing without it (the look is still made, the updates are listed in the app); a job started by the system with no

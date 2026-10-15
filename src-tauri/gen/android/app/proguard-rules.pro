@@ -24,6 +24,9 @@
 -keep class jp.git_app.client.BackgroundCheck { *; }
 
 # The page calls these methods by name (window.GiiitAndroid)
+-keepclassmembers class jp.git_app.client.BillingBridge {
+    @android.webkit.JavascriptInterface <methods>;
+}
 -keepclassmembers class jp.git_app.client.DeviceBridge {
     @android.webkit.JavascriptInterface <methods>;
 }

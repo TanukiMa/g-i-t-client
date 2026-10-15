@@ -14,6 +14,7 @@ class MainActivity : TauriActivity() {
   // The settings screen reads the phone's notification and battery state through this (see DeviceBridge).
   override fun onWebViewCreate(webView: WebView) {
     webView.addJavascriptInterface(DeviceBridge(this), "GiiitAndroid")
+    webView.addJavascriptInterface(BillingBridge(this, webView), "GiiitBilling")
   }
 
   // When the app is left, the follow list may have changed: book the next look for the time that the state now says.

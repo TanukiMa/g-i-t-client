@@ -11,6 +11,39 @@
   const fmt = (ms) => new Date(ms).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) + " JST";
   const when = (ms) => (ms ? fmt(ms) : "まだ確認していません");
 
+  // Google Play subscription (Android store build only): the bridge is BillingBridge.kt. The store decides; the page only hands
+  // its answer to the core. The expiry is short (3 days) and renewed at every confirmation, because there is no server to read
+  // the real end date from.
+  const play = window.GiiitBilling;
+  let storeBuild = false, playOffers = [], playError = "", lastPlan = "free";
+  function showPlay(plan) {
+    lastPlan = plan;
+    const on = !!play && storeBuild;
+    $("playBox").hidden = !on;
+    if (!on) return;
+    const paid = plan === "pro";
+    for (const [id, btn, label] of [["monthly", "buyMonthly", "月額"], ["yearly", "buyYearly", "年額"]]) {
+      const o = playOffers.find((x) => x.id === id);
+      $(btn).hidden = paid || !o;
+      if (o) $(btn).textContent = `${label} ${o.price}で購入（Google Play）`;
+    }
+    $("manageBtn").hidden = !paid;
+    $("playNote").textContent = playError ? `Google Play: ${playError}` : (paid ? "Google Play の購読が有効です。" : (playOffers.length ? "購入すると、無料プランの制限がなくなります。税別の価格です。" : ""));
+  }
+  window.giiitBillingChanged = (r) => {
+    playOffers = r.offers || [];
+    playError = r.ok ? "" : (r.error || "");
+    // only a successful answer may change the plan: a failed one says nothing about the subscription
+    if (r.ok) invoke("set_store_entitlement", { source: "google-play", expiresMs: r.entitled ? Date.now() + 3 * 86400000 : 0 }).then(load);
+    else showPlay(lastPlan);
+  };
+  if (play) {
+    $("buyMonthly").addEventListener("click", () => play.buy("monthly"));
+    $("buyYearly").addEventListener("click", () => play.buy("yearly"));
+    $("manageBtn").addEventListener("click", () => play.manage());
+    document.addEventListener("visibilitychange", () => { if (!document.hidden && storeBuild) play.refresh(); });
+  }
+
   function statusLine(v) {
     $("status").textContent = `通知の対象 ${v.active.length} サイト ・ サイトの最終実行 ${v.generatedMs ? when(v.generatedMs) : "不明"} ・ 最終確認 ${when(v.lastCheck)}`
       + (v.active.length ? ` ・ 次回 ${fmt(v.nextCheck)}` : "")
@@ -19,6 +52,7 @@
     $("planText").textContent = v.planText;
     $("buyBtn").hidden = !v.purchaseUrl || v.plan === "pro"; buyUrl = v.purchaseUrl;
     $("licenseRow").hidden = v.storeBuild;
+    storeBuild = v.storeBuild; showPlay(v.plan);
     $("about").textContent = v.about; baseUrl = v.baseUrl;
   }
 
@@ -229,7 +263,7 @@
   $("testBtn").addEventListener("click", async () => { if (await askNotify()) invoke("test_notification"); });
   // desktop only: the start-at-login switch has no meaning on a phone
   if (/android|iphone|ipad/i.test(navigator.userAgent)) { $("login").hidden = true; $("loginLabel").hidden = true; }
-  load();
+  load().then(() => { if (play && storeBuild) play.refresh(); });
   showNotifyState();
   showDeviceState();
 })();
