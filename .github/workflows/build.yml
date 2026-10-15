@@ -1,7 +1,7 @@
 name: Build G醫t client (unsigned)
 
 # Manual only. UNTESTED on GitHub's runners: the Windows build and `cargo test -p git_core` were run locally;
-# the macOS / Android / iOS-simulator jobs follow the Tauri 2 documentation. Signing certificates / keystores are not set up.
+# the Linux / macOS / Android / iOS-simulator jobs follow the Tauri 2 documentation. Signing certificates / keystores are not set up.
 on:
   workflow_dispatch:
 
@@ -35,8 +35,29 @@ jobs:
           projectPath: .
           uploadWorkflowArtifacts: true
 
-  # Android builds on Linux: the Android SDK is installed there too, and Linux minutes are the cheapest (the Windows runner
-  # has no advantage). The project files are generated here (`tauri android init`); commit them once the app is stable.
+  # Linux: the Debian package of Tauri (amd64). The deb of `debian/` (own apt repository) is built by hand, see AGENTS.md section 1a.
+  linux-deb:
+    needs: core-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev patchelf
+      - uses: actions/setup-node@v7
+        with: { node-version: '22' }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: . }
+      - run: npm install
+      - run: npx tauri build --bundles deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: g-i-t-client-deb
+          path: target/release/bundle/deb/*.deb
+
+  # Android builds on Linux (cheapest minutes). `src-tauri/gen/android` is COMMITTED (it holds our Kotlin job and bridge), so
+  # `tauri android init` must NOT run here: it would overwrite them. All four ABIs, x86_64 included (ChromeOS).
   android:
     needs: core-tests
     runs-on: ubuntu-latest
@@ -52,8 +73,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: . }
       - run: npm install
-      - run: npx tauri android init
       - run: npx tauri android build --apk
+        env:
+          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+      - name: Check the four ABIs
+        run: |
+          apk=$(ls src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk)
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do unzip -l "$apk" | grep -q "lib/$abi/libgit_client_lib.so" || { echo "missing $abi"; exit 1; }; done
       - uses: actions/upload-artifact@v4
         with:
           name: g-i-t-client-android-apk
@@ -74,5 +100,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: { workspaces: . }
       - run: npm install
-      - run: npx tauri ios init
+      - run: npx tauri ios init # gen/apple is not committed yet
       - run: npx tauri ios build --debug --target aarch64-sim

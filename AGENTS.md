@@ -441,7 +441,11 @@ By hand on a build (not automated — say so when you did not do it):
 
 ## 10. Open decisions (ask the owner; do not guess)
 
-1. Prices, billing period (monthly/yearly), and product IDs for each store.
+1. ~~Prices~~ **Decided (owner, 2026-10-15): 1,000 yen per month or 10,000 yen per year, both excluding tax.** Product IDs per store are still open.
+   **Channels decided:** first release on **Google Play**; Windows: GitHub + a winget manifest, later Microsoft Store; macOS: GitHub +
+   a Homebrew tap, later Mac App Store; Debian: an apt line (repository) on GitHub; iOS: App Store. Store builds (Google Play,
+   Microsoft Store, Mac App Store, App Store) are bought through that store's subscription; every other build (winget, Homebrew,
+   `.deb`) through Stripe + license key. Not started: store billing code, winget manifest, Homebrew tap, apt repository.
 2. Whether the limits stay at 3 sites / 1 look a day, or other features also become paid.
 3. What happens at a refund or cancellation beyond "the store result expires" (today: nothing special).
 4. How many devices one Stripe license key may be used on (today: unlimited; no way to count without a server).
