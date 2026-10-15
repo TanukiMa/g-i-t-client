@@ -1,7 +1,6 @@
 name: Build G醫t client (unsigned)
 
-# Manual only. UNTESTED on GitHub's runners: the Windows build and `cargo test -p git_core` were run locally;
-# the Linux / macOS / Android / iOS-simulator jobs follow the Tauri 2 documentation. Signing certificates / keystores are not set up.
+# Manual only. All jobs passed on GitHub's runners on 2026-10-16 (built files not installed or run there). Signing certificates / keystores are not set up.
 on:
   workflow_dispatch:
 

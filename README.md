@@ -98,9 +98,8 @@ itself on Linux (a value you set is kept).
 
 ## CI
 
-`.github/workflows/build.yml` (manual) builds unsigned bundles on GitHub's runners. **Untested there**: the Windows build, the
-Android debug build and the Linux packages were run locally; the macOS and iOS-simulator jobs were written from the Tauri
-documentation and have not run.
+`.github/workflows/build.yml` (manual) builds unsigned bundles on GitHub's runners. All jobs (core tests, Windows, macOS, Linux `.deb`, Android with the four ABIs, iOS simulator) passed on 2026-10-16; the
+results were not installed or run on those systems.
 
 ## Free and paid use
 

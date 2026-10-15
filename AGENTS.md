@@ -102,7 +102,7 @@ g-i-t-client/
 ├── scripts/make-debian-orig.sh   makes ../giiit_<version>.orig.tar.xz (source + `cargo vendor`)
 ├── ui/                   plain HTML/JS/CSS, no bundler (index.html, app.js, style.css)
 ├── icon.png              source of the icons (`npm run icons`)
-├── .github/workflows/build.yml   manual, unsigned bundles (Windows/macOS/Android/iOS simulator) — [partly]: not run on GitHub yet; the Windows build, the Android debug APK and the Linux packages were built locally
+├── .github/workflows/build.yml   manual, unsigned bundles (Windows/macOS/Android/iOS simulator) — [done] run on GitHub on 2026-10-16: core tests, Windows, macOS, Linux deb, Android (4 ABIs checked) and iOS simulator all passed (the built files were only downloaded as artifacts for the deb and the APK, not installed or run)
 ├── README.md             user-facing documentation
 ├── ChangeLog.md          what changed, by area (update it with every change that a user or a developer would notice)
 ├── TRADEMARK.md          name and logo policy (draft; the owner fills the FIXME lines)

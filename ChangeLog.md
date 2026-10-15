@@ -142,6 +142,6 @@ background checking, open decisions, working rules); `README.md` rewritten to th
   real phone, not over days, not under Doze); the
   buttons of the device state were not pressed there. iOS: `BGAppRefreshTask`; push (APNs/FCM). macOS and iOS were not built.
 - The `.deb` packages were not installed; notifications, tray and autostart were not tried on Linux. ChromeOS was not tried.
-- `build.yml` was not run on GitHub's runners.
+- `build.yml` runs on GitHub (all jobs passed on 2026-10-16); what it builds was not installed or run on those systems.
 - Final targets of the help links under このアプリについて; a help page for the app itself.
 - Maintainer, copyright and trademark owner fields (`FIXME`) in `debian/` and `TRADEMARK.md`.
