@@ -17,3 +17,4 @@ ureq = "2"
 
 [dev-dependencies]
 getrandom = "0.2"
+tempfile = "3"

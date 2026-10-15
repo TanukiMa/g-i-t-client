@@ -262,6 +262,32 @@ impl State {
     }
 }
 
+/// An advisory lock on `<state file>.lock`. The app and the background job of a phone both read the state, look at the
+/// sites and save: they must not do that at the same time (one would overwrite what the other remembered and announce it
+/// again). Released when dropped. Needs Rust 1.89 (`File::lock`).
+pub struct FileLock(#[allow(dead_code)] std::fs::File);
+
+impl FileLock {
+    pub fn acquire(state_path: &Path) -> std::io::Result<FileLock> {
+        if let Some(dir) = state_path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let f = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(state_path.with_extension("lock"))?;
+        f.lock()?;
+        Ok(FileLock(f))
+    }
+
+    /// The lock if it is free right now, else `None` (nobody waits).
+    pub fn try_acquire(state_path: &Path) -> Option<FileLock> {
+        if let Some(dir) = state_path.parent() {
+            std::fs::create_dir_all(dir).ok()?;
+        }
+        let f = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(state_path.with_extension("lock")).ok()?;
+        f.try_lock().ok()?;
+        Some(FileLock(f))
+    }
+}
+
 /// Atomic: a crash never leaves a half-written file.
 pub fn save(path: &Path, state: &State) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
