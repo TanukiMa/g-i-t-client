@@ -117,7 +117,10 @@
         const b = document.createElement("button");
         b.type = "button"; b.className = "chip";
         b.setAttribute("aria-pressed", String(v.tags.includes(t.name)));
+        const picked = v.tags.includes(t.name);
         b.textContent = `${t.name} ${t.count}`;
+        // 0 = nothing is left next to the picks of the other headings (it would not add a site): shown dimmed, still pressable
+        b.classList.toggle("empty", t.count === 0 && !picked);
         b.addEventListener("click", () => pickTag(t.name));
         row.append(b);
       }
@@ -131,7 +134,9 @@
     await load();
   }
   function chipTexts(v) {
-    const n = v.tags.length ? `選んだ分野の ${v.ruleCount} サイトが対象です。` : "分野を選ぶと、対象のサイト数がここに出ます。";
+    const n = !v.tags.length ? "分野を選ぶと、対象のサイト数がここに出ます。"
+      : v.ruleCount === 0 ? "選んだ分野の組み合わせに、合うサイトがありません。違う見出しの分野は「すべて」に当てはまるサイトだけが対象になります（例: 「職能・業界団体」と「がん」）。どちらかを外してください。"
+      : `選んだ分野の ${v.ruleCount} サイトが対象です。`;
     $("chipCount").textContent = n; $("setupCount").textContent = n;
     $("chipNote").textContent = v.plan === "pro" ? "分野を選ぶと、その分野のサイトの更新が通知されます。新しく加わったサイトも自動で対象になります。見出しの中は「どれか」、見出し同士は「すべて」に当てはまるサイトです。"
       : v.plan === "trial" ? "お試し期間中は、分野で選べます。終わったあとも続けるには、有料プランが要ります（無料プランは 3 サイトまで個別に選べます）。"

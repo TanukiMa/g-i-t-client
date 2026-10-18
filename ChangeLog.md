@@ -119,6 +119,12 @@ background checking, open decisions, working rules); `README.md` rewritten to th
   not by the build.
 - MPL-2.0 chosen (not GPL/AGPL: store terms; AGPL's network clause means nothing for a client without a server).
 
+### Fixed (category picker)
+
+- A combination of categories from different headings that matches no site (for example 職能・業界団体 + がん) looked like a bug
+  ("0 サイト"). The chips now show the number they would give next to the other headings' picks, empty ones are dimmed, and the
+  screen explains a 0. The rule itself (or inside a heading, and between headings) is unchanged. Tests: 49.
+
 ### Added (Google Play Billing)
 
 - Android store build: `BillingBridge.kt` (Play Billing Library 8.3.0), purchase buttons for monthly 1,000 yen / yearly 10,000 yen

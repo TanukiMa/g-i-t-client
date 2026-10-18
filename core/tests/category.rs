@@ -50,7 +50,7 @@ fn the_tags_of_one_heading_are_alternatives_and_the_headings_are_all_required() 
 #[test]
 fn the_picker_shows_the_headings_in_the_sites_order_with_counts() {
     let (sites, groups) = sample();
-    let c = counts(&sites, &groups);
+    let c = counts(&sites, &groups, &[]);
     assert_eq!(c.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["種別", "領域", "組織", "その他"]);
     let kind = &c[0];
     assert_eq!(kind.tags.iter().map(|t| (t.name.as_str(), t.count)).collect::<Vec<_>>(), [("学会", 3), ("行政", 1), ("公的機関", 1)]);
@@ -58,7 +58,7 @@ fn the_picker_shows_the_headings_in_the_sites_order_with_counts() {
     assert_eq!(org.tags.iter().map(|t| t.name.as_str()).collect::<Vec<_>>(), ["厚生労働省", "PMDA"], "a tag no site carries is not offered");
     assert_eq!(c[3].tags[0].name, "その他のタグ");
     // a site that publishes no groups: everything comes under "その他"
-    let c = counts(&sites, &[]);
+    let c = counts(&sites, &[], &[]);
     assert_eq!(c.len(), 1);
     assert_eq!(c[0].name, "その他");
 }
@@ -314,4 +314,16 @@ fn an_update_that_says_nothing_changed_is_remembered_but_is_not_news() {
     assert!(notes.is_empty());
     assert_eq!(st.recent.len(), before);
     assert!(st.seen["s0"].len() >= 7);
+}
+
+#[test]
+fn a_chip_shows_what_it_would_leave_next_to_the_picks_of_the_other_headings() {
+    let (sites, groups) = sample();
+    let count = |c: &[git_core::category::GroupCount], tag: &str| c.iter().flat_map(|g| &g.tags).find(|t| t.name == tag).map(|t| t.count);
+    let with = counts(&sites, &groups, &strings(&["内科系"]));
+    assert_eq!(count(&with, "学会"), Some(1), "a society with that area");
+    assert_eq!(count(&with, "行政"), Some(0), "no administration site carries an area tag: the chip says so");
+    assert_eq!(count(&with, "外科系"), Some(1), "the same heading: an alternative, not narrowed by 内科系");
+    // nothing picked: the plain number of sites
+    assert_eq!(count(&counts(&sites, &groups, &[]), "学会"), Some(3));
 }

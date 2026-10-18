@@ -43,14 +43,25 @@ pub struct GroupCount {
 }
 
 /// What the picker shows: the headings in the site's order, each with the tags that at least one site carries and how many
-/// sites that is; tags that belong to no heading come last under "その他", sorted.
-pub fn counts(sites: &[Site], groups: &[Group]) -> Vec<GroupCount> {
-    let count = |tag: &str| sites.iter().filter(|s| s.tags.iter().any(|t| t == tag)).count();
-    let mut out: Vec<GroupCount> = vec![];
+/// sites that is; tags that belong to no heading come last under "その他", sorted. With tags already picked the number of a tag
+/// is what it would give next to the picks of the OTHER headings (the usual faceted count), so a chip that would leave nothing
+/// shows 0 instead of looking harmless: "職能・業界団体" + "がん" is 0 because no such body carries an area tag.
+pub fn counts(sites: &[Site], groups: &[Group], selected: &[String]) -> Vec<GroupCount> {
     let mut grouped: HashSet<&str> = HashSet::new();
     for g in groups {
         grouped.extend(g.tags.iter().map(String::as_str));
-        let tags: Vec<TagCount> = g.tags.iter().map(|t| TagCount { name: t.clone(), count: count(t) }).filter(|t| t.count > 0).collect();
+    }
+    let mut out: Vec<GroupCount> = vec![];
+    for g in groups {
+        // the picks of the other headings (the picks outside every heading count as one more heading)
+        let others: Vec<String> = selected.iter().filter(|t| !g.tags.contains(t)).cloned().collect();
+        let n = |tag: &str| {
+            let mut sel = others.clone();
+            sel.push(tag.to_string());
+            matching(sites, groups, &sel).len()
+        };
+        let present = |tag: &str| sites.iter().any(|s| s.tags.iter().any(|t| t == tag));
+        let tags: Vec<TagCount> = g.tags.iter().filter(|t| present(t)).map(|t| TagCount { name: t.clone(), count: n(t) }).collect();
         if !tags.is_empty() {
             out.push(GroupCount { name: g.name.clone(), tags });
         }
@@ -59,7 +70,16 @@ pub fn counts(sites: &[Site], groups: &[Group]) -> Vec<GroupCount> {
     rest.sort_unstable();
     rest.dedup();
     if !rest.is_empty() {
-        out.push(GroupCount { name: "その他".into(), tags: rest.into_iter().map(|t| TagCount { name: t.into(), count: count(t) }).collect() });
+        let others: Vec<String> = selected.iter().filter(|t| grouped.contains(t.as_str())).cloned().collect();
+        let tags = rest
+            .into_iter()
+            .map(|t| {
+                let mut sel = others.clone();
+                sel.push(t.to_string());
+                TagCount { name: t.into(), count: matching(sites, groups, &sel).len() }
+            })
+            .collect();
+        out.push(GroupCount { name: "その他".into(), tags });
     }
     out
 }

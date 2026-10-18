@@ -31,6 +31,7 @@ button:hover { filter: brightness(.92); }
 .chip { color: var(--fg); background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: .45em 1em; min-height: 2.6rem; }
 .chip:hover { filter: none; border-color: var(--accent); }
 .chip[aria-pressed="true"] { color: #fff; background: var(--accent); border-color: var(--accent); }
+.chip.empty { opacity: .45; border-style: dashed; }
 .chip:disabled { opacity: .55; cursor: default; }
 button.ghost { color: var(--fg); background: transparent; border: 1px solid var(--border); }
 button.ghost:hover { filter: none; border-color: var(--accent); }
