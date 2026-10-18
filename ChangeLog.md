@@ -119,6 +119,11 @@ background checking, open decisions, working rules); `README.md` rewritten to th
   not by the build.
 - MPL-2.0 chosen (not GPL/AGPL: store terms; AGPL's network clause means nothing for a client without a server).
 
+### Changed (category picker, 2026-10-19)
+
+- Picking several categories now selects the sites that carry ANY of them (or), whatever the heading; the "and between headings"
+  rule gave 0 sites for combinations like 職能・業界団体 + がん. Chip numbers are plain site counts again. Tests: 48.
+
 ### Fixed (category picker)
 
 - A combination of categories from different headings that matches no site (for example 職能・業界団体 + がん) looked like a bug

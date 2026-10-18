@@ -201,7 +201,7 @@ fn view(app: &AppHandle, s: &State) -> View {
         plan_text: plan_text(s, now_ms()),
         free_max_follows: FREE_MAX_FOLLOWS,
         active: s.effective_follow(now_ms()),
-        groups: counts(&s.sites, &s.groups, &s.tags),
+        groups: counts(&s.sites, &s.groups),
         tags: s.tags.clone(),
         rule_count: s.rule_matches().iter().filter(|x| !s.exclude.contains(x)).count(),
         unlocked: s.plan(now_ms()).unlocked(),

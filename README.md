@@ -36,9 +36,8 @@ cargo check -p git-client   # the shell compiles
 Needs Rust (stable). Windows: the Visual Studio C++ build tools and WebView2 (part of Windows 11). Linux: `libwebkit2gtk-4.1-dev`,
 `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `patchelf`.
 
-**First start.** The app asks which categories you want ("どの分野の更新を受け取りますか？": 種別, 組織, 内容, 領域). The tags of one
-heading are alternatives, the headings together are all required (学会 + がん または 感染症 = learned societies about cancer or
-infections). Sites that join a picked category later are followed without any action. You can also pick single sites (the long
+**First start.** The app asks which categories you want ("どの分野の更新を受け取りますか？": 種別, 組織, 内容, 領域). Every picked
+category is an alternative, whatever its heading (学会 + がん = the learned societies and the cancer sites together). Sites that join a picked category later are followed without any action. You can also pick single sites (the long
 list under 「サイトを個別に選ぶ・外す」) or paste the share URL of the ☆ list (設定 → ブラウザの☆から取り込む; dashboard →
 「🔗 フォロー設定を共有」). The app then sits in the tray / menu bar and looks for news **after the runs of the pipeline** (a short
 window after each of 7:30, 12:30, 16:30 JST, read from `feeds/status.json`), not every few minutes; a site without that file is

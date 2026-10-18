@@ -115,7 +115,7 @@ g-i-t-client/
 ## 3. Commands
 
 ```powershell
-cargo test -p git_core          # core tests, offline (currently 5 + 13 + 14 + 4 + 13 = 49, 0 doc)
+cargo test -p git_core          # core tests, offline (currently 5 + 12 + 14 + 4 + 13 = 48, 0 doc)
 cargo check -p git-client       # the Tauri shell compiles (first run takes minutes; run it in the background)
 npm install; npm run dev        # run the app
 npm run build                   # installer in target/release/bundle
@@ -172,13 +172,10 @@ New fields must have `#[serde(default)]` behaviour (the struct has it) so that o
 - The dashboard publishes `tags` per site and, since `g-i-t-app` commit `3deaa04`, `groups` (`tag_groups` of
   config.yaml: headings and their tags, in order) in `search.json`. The client reads both (`parse_sites`, `parse_groups`).
   A dashboard without `groups` still works: all tags come under one heading "その他", sorted.
-- **Rule (`category.rs`, `matching`)**: the picked tags of one heading are alternatives ("or"), the headings are all
-  required ("and"); picked tags of no heading form one more heading; nothing picked matches nothing. Example: 学会 +
-  (がん or 感染症).
-- **Chip numbers are conditional** (`counts(sites, groups, selected)`): a chip shows how many sites it would give next to the picks
-  of the OTHER headings (same-heading picks are alternatives and do not narrow it). A chip with 0 is dimmed, and when the picks
-  leave no site the screen says so. Reason: "職能・業界団体" (種別) + "がん" (領域) is 0 sites, because no such body carries an area
-  tag, and the screen used to just say "0 サイト" (reported by the owner as a suspected bug; the rule itself is as specified).
+- **Rule (`category.rs`, `matching`)**: every picked tag is an alternative ("or"), whatever heading it is under; a site matches
+  when it carries at least one picked tag; nothing picked matches nothing. (Owner's decision 2026-10-19: it used to be "or"
+  within a heading and "and" across headings, which gave 0 sites for e.g. 職能・業界団体 + がん.) Chip numbers are the plain
+  number of sites that carry the tag (`counts(sites, groups)`).
 - **State**: `tags` (picked categories), `exclude` (sites of a picked category that the user switched off), `follow`
   (sites added one by one), `groups`, `onboarded`. `State::effective_follow` = `follow` + (sites matching `tags` −
   `exclude`) on the paid plan and in the trial; on the free plan only the first 3 of `follow` (categories are kept but
